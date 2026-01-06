@@ -23,10 +23,6 @@ const formatPercentNoSign = (value: number) => {
   return `${value.toFixed(1)}%`
 }
 
-const formatNumber = (value: number) => {
-  return new Intl.NumberFormat('en-CA').format(value)
-}
-
 type SectorData = {
   name: string
   amount: number
@@ -80,7 +76,6 @@ const SectorAllocationChart = () => {
     return sectors
   }, [])
 
-  const total = sectorData.reduce((sum, sector) => sum + sector.amount, 0)
   const technologyPercentage = sectorData.find((s) => s.name === 'Technology')?.percentage || 0
 
   const radius = 120
@@ -284,7 +279,7 @@ const PortfolioPerformanceChart = () => {
         <g className="text-xs text-slate-500">
           {chartData
             .filter((_, index) => index % 2 === 0)
-            .map((point, idx) => {
+            .map((point) => {
               const originalIndex = chartData.findIndex((p) => p.date === point.date)
               const x = scaleX(originalIndex)
               return (

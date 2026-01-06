@@ -230,7 +230,7 @@ const TrendGrid = ({
                 KEY METRICS
               </p>
               <div className="mt-2 grid grid-cols-2 gap-3">
-                {Object.entries(selectedAnalysis.keyMetrics).map(([key, value], index, array) => {
+                {Object.entries(selectedAnalysis.keyMetrics).map(([key, value], index) => {
                   const isPositiveValue = typeof value === 'string' && (value.startsWith('+') || value.includes('Positive'))
                   const valueColor = isPositiveValue ? 'text-emerald-700' : 'text-slate-900'
                   const isFirstRow = index < 2
@@ -404,11 +404,9 @@ const OptionStrategies = ({
 
 const HoldingsList = ({
   filteredHoldings,
-  selectedId,
   onSelect,
 }: {
   filteredHoldings: PortfolioHolding[]
-  selectedId: string
   onSelect: (id: string) => void
 }) => {
   return (
@@ -445,7 +443,6 @@ const HoldingsList = ({
       </div>
       <ul className="divide-y divide-slate-200" role="list">
         {filteredHoldings.map((holding, index) => {
-          const isSelected = selectedId === holding.id
           const isEvenRow = index % 2 === 0
           const rowBgColor = isEvenRow ? 'bg-slate-100' : 'bg-white'
           return (
@@ -619,7 +616,6 @@ export const PortfolioOverview = () => {
 
           <HoldingsList
             filteredHoldings={filteredHoldings}
-            selectedId={selectedId}
             onSelect={setSelectedId}
           />
         </div>
