@@ -157,7 +157,7 @@ export const portfolioSummary = {
 }
 
 export type StockInsight = {
-  period: 'MORNING' | 'MIDDAY' | 'CLOSING'
+  period: 'Daily Brief' | 'Weekly Brief'
   text: string
 }
 
@@ -217,16 +217,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 29.8,
     insights: [
       {
-        period: 'MORNING',
-        text: 'NVIDIA continues to dominate AI chip market with H100 and upcoming H200 GPUs seeing unprecedented demand. Major cloud providers unable to secure enough inventory.',
+        period: 'Daily Brief',
+        text: 'NVIDIA continues to dominate AI chip market with H100 and upcoming H200 GPUs seeing unprecedented demand. Market digesting supply updates; analysts reaffirm overweight ratings citing strong data center backlog.',
       },
       {
-        period: 'MIDDAY',
-        text: 'Market digesting supply updates; analysts reaffirm overweight ratings citing strong data center backlog.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'Volatility eased into close; investors watching next earnings for forward guidance and supply expansion.',
+        period: 'Weekly Brief',
+        text: 'Strong week for NVIDIA as AI demand narrative remains intact. Volatility eased; investors watching next earnings for forward guidance and supply expansion.',
       },
     ],
     recommendation: 'Sell',
@@ -343,16 +339,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 14.2,
     insights: [
       {
-        period: 'MORNING',
-        text: 'Azure and Office demand remain resilient while AI services attach grows.',
+        period: 'Daily Brief',
+        text: 'Azure and Office demand remain resilient while AI services attach grows. Enterprise pipelines steady; cloud margins benefitting from utilization discipline.',
       },
       {
-        period: 'MIDDAY',
-        text: 'Enterprise pipelines steady; cloud margins benefitting from utilization discipline.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'Investors watching Copilot adoption metrics and OpenAI partnership updates.',
+        period: 'Weekly Brief',
+        text: 'Microsoft maintains solid week-over-week performance. Investors watching Copilot adoption metrics and OpenAI partnership updates.',
       },
     ],
     recommendation: 'Hold',
@@ -430,16 +422,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 11.1,
     insights: [
       {
-        period: 'MORNING',
-        text: 'Services revenue and higher-end iPhone mix offsetting softer hardware cycles.',
+        period: 'Daily Brief',
+        text: 'Services revenue and higher-end iPhone mix offsetting softer hardware cycles. Wearables steady; supply chain commentary constructive for next half.',
       },
       {
-        period: 'MIDDAY',
-        text: 'Wearables steady; supply chain commentary constructive for next half.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'Street focused on AR/VR roadmap and on-device AI differentiation.',
+        period: 'Weekly Brief',
+        text: 'Apple showing resilience this week with strong services performance. Street focused on AR/VR roadmap and on-device AI differentiation.',
       },
     ],
     recommendation: 'Hold',
@@ -551,16 +539,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 9.5,
     insights: [
       {
-        period: 'MORNING',
-        text: 'Search revenue stable; cloud growth moderating but profitable.',
+        period: 'Daily Brief',
+        text: 'Search revenue stable; cloud growth moderating but profitable. AI model launches broaden monetization experiments across ads and cloud.',
       },
       {
-        period: 'MIDDAY',
-        text: 'AI model launches broaden monetization experiments across ads and cloud.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'Capex guide watched for alignment with AI infrastructure investments.',
+        period: 'Weekly Brief',
+        text: 'Google maintaining steady week-over-week performance. Capex guide watched for alignment with AI infrastructure investments.',
       },
     ],
     recommendation: 'Buy',
@@ -638,16 +622,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 11.1,
     insights: [
       {
-        period: 'MORNING',
-        text: 'Broad market tracking continues to benefit from tech-led strength.',
+        period: 'Daily Brief',
+        text: 'Broad market tracking continues to benefit from tech-led strength. Flows supportive; volatility contained with balanced sector performance.',
       },
       {
-        period: 'MIDDAY',
-        text: 'Flows supportive; volatility contained with balanced sector performance.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'Rebalancing near month-end expected to keep range bound trading.',
+        period: 'Weekly Brief',
+        text: 'Solid weekly performance for the index. Rebalancing near month-end expected to keep range bound trading.',
       },
     ],
     recommendation: 'Hold',
@@ -758,16 +738,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 7.4,
     insights: [
       {
-        period: 'MORNING',
-        text: 'Production steady; investors tracking Cybertruck ramp pace.',
+        period: 'Daily Brief',
+        text: 'Production steady; investors tracking Cybertruck ramp pace. Auto margins sensitive to pricing; energy storage outlook supportive.',
       },
       {
-        period: 'MIDDAY',
-        text: 'Auto margins sensitive to pricing; energy storage outlook supportive.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'Sentiment tied to FSD progress and regulatory milestones.',
+        period: 'Weekly Brief',
+        text: 'Tesla showing mixed week with focus on production updates. Sentiment tied to FSD progress and regulatory milestones.',
       },
     ],
     recommendation: 'Hold',
@@ -845,16 +821,12 @@ export const stockDetails: Record<string, StockDetail> = {
     changePct: 8.9,
     insights: [
       {
-        period: 'MORNING',
-        text: 'AWS optimization headwinds fading; ads segment remains strong.',
+        period: 'Daily Brief',
+        text: 'AWS optimization headwinds fading; ads segment remains strong. Logistics efficiency gains underpin retail margin expansion.',
       },
       {
-        period: 'MIDDAY',
-        text: 'Logistics efficiency gains underpin retail margin expansion.',
-      },
-      {
-        period: 'CLOSING',
-        text: 'AI services attach within AWS a key watch item for next quarter.',
+        period: 'Weekly Brief',
+        text: 'Amazon showing improved sentiment this week. AI services attach within AWS a key watch item for next quarter.',
       },
     ],
     recommendation: 'Buy',
@@ -934,16 +906,12 @@ export const featuredDetail: StockDetail = {
   changePct: 29.8,
   insights: [
     {
-      period: 'MORNING',
-      text: 'NVIDIA continues to dominate AI chip market with H100 and upcoming H200 GPUs seeing unprecedented demand. Major cloud providers unable to secure enough inventory.',
+      period: 'Daily Brief',
+      text: 'NVIDIA continues to dominate AI chip market with H100 and upcoming H200 GPUs seeing unprecedented demand. Market digesting supply updates; analysts reaffirm overweight ratings citing strong data center backlog.',
     },
     {
-      period: 'MIDDAY',
-      text: 'Market digesting supply updates; analysts reaffirm overweight ratings citing strong data center backlog.',
-    },
-    {
-      period: 'CLOSING',
-      text: 'Volatility eased into close; investors watching next earnings for forward guidance and supply expansion.',
+      period: 'Weekly Brief',
+      text: 'Strong week for NVIDIA as AI demand narrative remains intact. Volatility eased; investors watching next earnings for forward guidance and supply expansion.',
     },
   ],
   recommendation: 'Sell',

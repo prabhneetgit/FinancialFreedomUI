@@ -12,6 +12,17 @@ dist
 dist-ssr
 *.local
 
+# Environment files (never commit secrets/config)
+.env
+.env.*
+!.env.example
+
+# Vite pre-bundle cache
+.vite/
+
+# Salesforce
+.sfdx/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
