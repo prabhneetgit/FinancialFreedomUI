@@ -1,424 +1,28 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { usePortfolio } from '../hooks/usePortfolio'
 import { useAnalytics as useAnalyticsHook } from '../hooks/useAnalytics'
 import { usePerformanceHistory } from '../hooks/usePerformanceHistory'
-import type { 
-  PositionSizingAnalysis as PositionSizingAnalysisType, 
-  DividendIncomeData, 
-  PerformanceDataPoint, 
-  SectorDiversificationAnalysis,
-  MarketSentiment,
+import type {
   AlertSeverityType,
+  DividendIncomeData,
+  MarketSentiment,
+  PerformanceDataPoint,
+  PositionSizingAnalysis as PositionSizingAnalysisType,
+  RebalancingMetadata,
+  RebalancingRecommendation,
+  RiskMetrics,
+  RiskStatusType,
+  SectorAllocation,
+  SectorDiversificationAnalysis,
+  TaxLossHarvestingOpportunity,
 } from '../types/api'
 
-const formatCurrency = (value: number) => {
-  const formatted = new Intl.NumberFormat('en-CA', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value)
-  return `$${formatted} CAD`
-}
+const MINUS = '−'
+const cad = (value: number) => `${value < 0 ? MINUS : ''}$${Math.round(Math.abs(value)).toLocaleString('en-CA')}`
+const signedPct = (value: number, digits = 2) => `${value >= 0 ? '+' : MINUS}${Math.abs(value).toFixed(digits)}%`
+const tone = (value: number) => (value >= 0 ? 'text-gain' : 'text-loss')
 
-const formatCurrencyShort = (value: number) => {
-  const thousands = Math.round(value / 1_000)
-  return `$${thousands}K`
-}
-
-const formatPercent = (value: number) => {
-  const sign = value >= 0 ? '+' : ''
-  return `${sign}${value.toFixed(2)}%`
-}
-
-const formatPercentNoSign = (value: number) => {
-  return `${value.toFixed(1)}%`
-}
-
-type SectorData = {
-  name: string
-  amount: number
-  percentage: number
-  color: string
-}
-
-const SectorAllocationChart = ({
-  sectorAllocation,
-  diversificationAnalysis,
-  diversificationLoading,
-}: {
-  sectorAllocation: Array<{ name: string; amount: number; percentage: number; color?: string }>
-  diversificationAnalysis: SectorDiversificationAnalysis | null
-  diversificationLoading: boolean
-}) => {
-  const sectorData = useMemo(() => {
-    const sectorConfigs: Record<string, string> = {
-      Technology: '#6366F1',
-      'Index Fund': '#10B981',
-      Cryptocurrency: '#F59E0B',
-      Consumer: '#EC4899',
-      Automotive: '#06B6D4',
-      Other: '#94A3B8',
-    }
-
-    return sectorAllocation
-      .map((sector) => ({
-        name: sector.name,
-        amount: sector.amount,
-        percentage: sector.percentage,
-        color: sector.color || sectorConfigs[sector.name] || '#94A3B8',
-      }))
-      .sort((a, b) => b.amount - a.amount)
-  }, [sectorAllocation])
-
-  const totalValue = sectorData.reduce((sum, s) => sum + s.amount, 0)
-
-  const outerRadius = 120
-  const innerRadius = 70
-  const centerX = 150
-  const centerY = 150
-
-  const createDonutArc = (startAngle: number, endAngle: number, largeArc: boolean) => {
-    const startRad = (startAngle * Math.PI) / 180
-    const endRad = (endAngle * Math.PI) / 180
-    
-    const x1Outer = centerX + outerRadius * Math.cos(startRad)
-    const y1Outer = centerY + outerRadius * Math.sin(startRad)
-    const x2Outer = centerX + outerRadius * Math.cos(endRad)
-    const y2Outer = centerY + outerRadius * Math.sin(endRad)
-    
-    const x1Inner = centerX + innerRadius * Math.cos(endRad)
-    const y1Inner = centerY + innerRadius * Math.sin(endRad)
-    const x2Inner = centerX + innerRadius * Math.cos(startRad)
-    const y2Inner = centerY + innerRadius * Math.sin(startRad)
-    
-    return `M ${x1Outer} ${y1Outer} 
-            A ${outerRadius} ${outerRadius} 0 ${largeArc ? 1 : 0} 1 ${x2Outer} ${y2Outer} 
-            L ${x1Inner} ${y1Inner} 
-            A ${innerRadius} ${innerRadius} 0 ${largeArc ? 1 : 0} 0 ${x2Inner} ${y2Inner} 
-            Z`
-  }
-
-  const sectorsWithAngles = sectorData.reduce(
-    (acc, sector) => {
-      const startAngle = acc.currentAngle
-      const sectorAngle = (sector.percentage / 100) * 360
-      const endAngle = startAngle + sectorAngle
-      acc.sectors.push({
-        ...sector,
-        startAngle,
-        endAngle,
-        sectorAngle,
-      })
-      acc.currentAngle = endAngle
-      return acc
-    },
-    { sectors: [] as Array<SectorData & { startAngle: number; endAngle: number; sectorAngle: number }>, currentAngle: -90 }
-  ).sectors
-
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case 'Well Diversified':
-        return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500' }
-      case 'Moderately Diversified':
-        return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500' }
-      default:
-        return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', dot: 'bg-red-500' }
-    }
-  }
-
-  const getPriorityConfig = (priority: string) => {
-    switch (priority) {
-      case 'High':
-        return { bg: 'bg-red-100', text: 'text-red-700' }
-      case 'Medium':
-        return { bg: 'bg-amber-100', text: 'text-amber-700' }
-      default:
-        return { bg: 'bg-emerald-100', text: 'text-emerald-700' }
-    }
-  }
-
-  const statusConfig = diversificationAnalysis 
-    ? getStatusConfig(diversificationAnalysis.status) 
-    : { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400' }
-
-  return (
-    <div className="rounded-2xl border border-slate-200/60 bg-gradient-to-br from-slate-50 to-white p-8 shadow-lg">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Sector Allocation</h2>
-          <p className="mt-1 text-sm text-slate-500">AI-powered portfolio analysis</p>
-        </div>
-        <div className={`flex items-center gap-2 rounded-full ${statusConfig.bg} ${statusConfig.border} border px-4 py-2`}>
-          {diversificationLoading ? (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600"></div>
-          ) : (
-            <div className={`h-2 w-2 rounded-full ${statusConfig.dot} animate-pulse`}></div>
-          )}
-          <span className={`text-sm font-semibold ${statusConfig.text}`}>
-            {diversificationLoading ? 'Analyzing...' : diversificationAnalysis?.status || 'Loading'}
-          </span>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-        <div className="relative flex-shrink-0 mx-auto lg:mx-0">
-          <svg width={300} height={300} viewBox="0 0 300 300" className="drop-shadow-xl">
-            <defs>
-              {sectorsWithAngles.map((sector, idx) => (
-                <filter key={`shadow-${idx}`} id={`shadow-${sector.name.replace(/\s+/g, '-')}`}>
-                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.15" />
-                </filter>
-              ))}
-              <linearGradient id="centerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#f8fafc" />
-                <stop offset="100%" stopColor="#e2e8f0" />
-              </linearGradient>
-            </defs>
-            
-            <circle 
-              cx={centerX} 
-              cy={centerY} 
-              r={outerRadius + 8} 
-              fill="none" 
-              stroke="#e2e8f0" 
-              strokeWidth="1" 
-              strokeDasharray="4,4"
-              opacity="0.5"
-            />
-            
-            {sectorsWithAngles.map((sector) => {
-              const largeArc = sector.sectorAngle > 180
-              const path = createDonutArc(sector.startAngle, sector.endAngle, largeArc)
-
-              return (
-                <g key={sector.name}>
-                  <path
-                    d={path}
-                    fill={sector.color}
-                    stroke="white"
-                    strokeWidth="3"
-                    filter={`url(#shadow-${sector.name.replace(/\s+/g, '-')})`}
-                    className="transition-all duration-300 hover:opacity-90 cursor-pointer"
-                    style={{
-                      transform: 'scale(1)',
-                      transformOrigin: `${centerX}px ${centerY}px`,
-                    }}
-                  />
-                </g>
-              )
-            })}
-            
-            <circle 
-              cx={centerX} 
-              cy={centerY} 
-              r={innerRadius - 5} 
-              fill="url(#centerGradient)"
-              className="drop-shadow-inner"
-            />
-            
-            {diversificationAnalysis && !diversificationLoading ? (
-              <>
-                <text
-                  x={centerX}
-                  y={centerY - 8}
-                  textAnchor="middle"
-                  className="fill-slate-900 font-bold"
-                  style={{ fontSize: '28px' }}
-                >
-                  {diversificationAnalysis.score}
-                </text>
-                <text
-                  x={centerX}
-                  y={centerY + 14}
-                  textAnchor="middle"
-                  className="fill-slate-500"
-                  style={{ fontSize: '11px', fontWeight: 500 }}
-                >
-                  Diversification Score
-                </text>
-              </>
-            ) : (
-              <>
-                <text
-                  x={centerX}
-                  y={centerY - 12}
-                  textAnchor="middle"
-                  className="fill-slate-900 font-bold"
-                  style={{ fontSize: '22px' }}
-                >
-                  {totalValue >= 1_000_000 ? `$${(totalValue / 1_000_000).toFixed(1)}M` : 
-                   totalValue >= 1_000 ? `$${(totalValue / 1_000).toFixed(1)}K` : 
-                   `$${totalValue.toFixed(0)}`}
-                </text>
-                <text
-                  x={centerX}
-                  y={centerY + 12}
-                  textAnchor="middle"
-                  className="fill-slate-500"
-                  style={{ fontSize: '12px', fontWeight: 500 }}
-                >
-                  Total Value
-                </text>
-              </>
-            )}
-          </svg>
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-col gap-3">
-            {sectorData.map((sector) => (
-              <div 
-                key={sector.name} 
-                className="group flex items-center gap-4 rounded-xl bg-white p-4 border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all duration-200"
-              >
-                <div 
-                  className="h-12 w-12 rounded-xl flex items-center justify-center shadow-sm"
-                  style={{ backgroundColor: `${sector.color}15` }}
-                >
-                  <div
-                    className="h-6 w-6 rounded-lg"
-                    style={{ backgroundColor: sector.color }}
-                  />
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-semibold text-slate-900 truncate">{sector.name}</span>
-                    <span className="text-lg font-bold text-slate-900 ml-2">
-                      {formatPercentNoSign(sector.percentage)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ 
-                          width: `${sector.percentage}%`, 
-                          backgroundColor: sector.color,
-                        }}
-                      />
-                    </div>
-                    <span className="text-sm font-medium text-slate-600 min-w-[60px] text-right">
-                      {formatCurrencyShort(sector.amount)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {diversificationAnalysis && !diversificationLoading && (
-        <div className="mt-8 space-y-6">
-          <div className="rounded-xl bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-200/60 p-5">
-            <div className="flex items-start gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100">
-                <svg className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-indigo-800">AI Analysis Summary</p>
-                <p className="mt-1 text-sm text-indigo-700">{diversificationAnalysis.summary}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            {diversificationAnalysis.strengths.length > 0 && (
-              <div className="rounded-xl bg-emerald-50/50 border border-emerald-200/60 p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <svg className="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span className="text-sm font-semibold text-emerald-800">Strengths</span>
-                </div>
-                <ul className="space-y-2">
-                  {diversificationAnalysis.strengths.map((strength, idx) => (
-                    <li key={`strength-${idx}-${strength.slice(0, 20)}`} className="flex items-start gap-2 text-sm text-emerald-700">
-                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
-                      {strength}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {diversificationAnalysis.risks.length > 0 && (
-              <div className="rounded-xl bg-amber-50/50 border border-amber-200/60 p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  <span className="text-sm font-semibold text-amber-800">Risks</span>
-                </div>
-                <ul className="space-y-2">
-                  {diversificationAnalysis.risks.map((risk, idx) => (
-                    <li key={`risk-${idx}-${risk.slice(0, 20)}`} className="flex items-start gap-2 text-sm text-amber-700">
-                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
-                      {risk}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
-          {diversificationAnalysis.suggestions.length > 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <svg className="h-5 w-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span className="text-sm font-semibold text-slate-900">AI Recommendations</span>
-              </div>
-              <div className="space-y-3">
-                {diversificationAnalysis.suggestions.map((suggestion, idx) => {
-                  const priorityConfig = getPriorityConfig(suggestion.priority)
-                  const suggestionKey = `suggestion-${idx}-${suggestion.sector}-${suggestion.action.slice(0, 15)}`
-                  return (
-                    <div 
-                      key={suggestionKey} 
-                      className="flex items-start gap-4 rounded-lg bg-slate-50 p-4 border border-slate-100"
-                    >
-                      <div className={`px-2.5 py-1 rounded-md text-xs font-semibold ${priorityConfig.bg} ${priorityConfig.text}`}>
-                        {suggestion.priority}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-slate-900">{suggestion.action}</span>
-                          <span className="text-slate-600">{suggestion.sector}</span>
-                          <span className="text-xs text-slate-500">
-                            ({suggestion.currentPercentage.toFixed(1)}% → {suggestion.targetPercentage.toFixed(1)}%)
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-600">{suggestion.reasoning}</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {diversificationLoading && (
-        <div className="mt-8 rounded-xl bg-slate-50 border border-slate-200 p-8">
-          <div className="flex flex-col items-center justify-center gap-4">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600"></div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-slate-700">AI Agent Analyzing Portfolio...</p>
-              <p className="text-xs text-slate-500 mt-1">Evaluating diversification and generating recommendations</p>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-const PortfolioPerformanceChart = ({ 
+export const PortfolioPerformanceChart = ({ 
   dataPoints,
   loading = false,
 }: { 
@@ -566,17 +170,12 @@ const PortfolioPerformanceChart = ({
     })
     .join(' ')
 
+  const lastIndex = chartData.length - 1
+
   return (
     <div className="w-full overflow-x-auto">
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="w-full max-w-full">
-        <defs>
-          <linearGradient id="portfolioGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.2" />
-            <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-
-        <g className="text-xs text-slate-500">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="h-auto w-full max-w-full">
+        <g className="text-[11px]">
           {yAxisTicks.map((value, tickIndex) => {
             const y = scaleY(value)
             return (
@@ -586,10 +185,10 @@ const PortfolioPerformanceChart = ({
                   y1={y}
                   x2={width - padding.right}
                   y2={y}
-                  stroke="#E2E8F0"
+                  stroke="#E4E4E4"
                   strokeWidth="1"
                 />
-                <text x={padding.left - 10} y={y + 4} textAnchor="end" fill="#64748B">
+                <text x={padding.left - 10} y={y + 4} textAnchor="end" fill="#6A6A6A">
                   {allValuesZero ? (value === 0 ? '$0' : '') : formatYAxisValue(value)}
                 </text>
               </g>
@@ -597,9 +196,9 @@ const PortfolioPerformanceChart = ({
           })}
         </g>
 
-        <g className="text-xs text-slate-500">
+        <g className="text-[11px]">
           {chartData
-            .filter((_, index) => index % 2 === 0 || index === chartData.length - 1)
+            .filter((_, index) => index % 2 === 0 || index === lastIndex)
             .map((point, filteredIndex) => {
               const originalIndex = chartData.findIndex((p) => p.date === point.date)
               const x = scaleX(originalIndex)
@@ -610,7 +209,7 @@ const PortfolioPerformanceChart = ({
                   x={x}
                   y={height - padding.bottom + 20}
                   textAnchor="middle"
-                  fill="#64748B"
+                  fill="#6A6A6A"
                 >
                   {point.date}
                 </text>
@@ -619,53 +218,838 @@ const PortfolioPerformanceChart = ({
         </g>
 
         <path
-          d={`${portfolioPath} L ${scaleX(chartData.length - 1)} ${chartHeight + padding.top} L ${padding.left} ${chartHeight + padding.top} Z`}
-          fill="url(#portfolioGradient)"
+          d={sp500Path}
+          fill="none"
+          stroke="#9A9A9A"
+          strokeWidth="1.5"
+          strokeDasharray="4,4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
 
         <path
           d={portfolioPath}
           fill="none"
-          stroke="#3B82F6"
-          strokeWidth="2"
+          stroke="#111111"
+          strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
 
-        <path
-          d={sp500Path}
-          fill="none"
-          stroke="#94A3B8"
+        <circle cx={scaleX(lastIndex)} cy={scaleY(chartData[lastIndex].sp500)} r="3.5" fill="#9A9A9A" />
+        <circle
+          cx={scaleX(lastIndex)}
+          cy={scaleY(chartData[lastIndex].portfolio)}
+          r="5"
+          fill="#111111"
+          stroke="#FFFFFF"
           strokeWidth="2"
-          strokeDasharray="5,5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
         />
-
-        {chartData.map((point, index) => {
-          const x = scaleX(index)
-          const portfolioY = scaleY(point.portfolio)
-          const sp500Y = scaleY(point.sp500)
-          const pointKey = `chart-point-${index}-${point.date || `no-date-${index}`}`
-          return (
-            <g key={pointKey}>
-              <circle cx={x} cy={portfolioY} r="3" fill="#3B82F6" />
-              <circle cx={x} cy={sp500Y} r="3" fill="#94A3B8" />
-            </g>
-          )
-        })}
       </svg>
     </div>
   )
 }
 
+const Section = ({
+  id,
+  title,
+  meta,
+  action,
+  small,
+  children,
+}: {
+  id: string
+  title: string
+  meta?: ReactNode
+  action?: ReactNode
+  small?: boolean
+  children: ReactNode
+}) => (
+  <section aria-labelledby={id} className="flex min-w-0 flex-col gap-6 border-t-[3px] border-ink pt-4">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+      <h2
+        id={id}
+        className={`font-serif font-medium leading-none ${small ? 'text-[28px] md:text-[32px]' : 'text-[34px] md:text-[40px]'}`}
+      >
+        {title}
+      </h2>
+      {(meta || action) && (
+        <div className="flex flex-wrap items-center gap-4">
+          {meta && <span className="text-[13px] text-[#4a4a4a]">{meta}</span>}
+          {action}
+        </div>
+      )}
+    </div>
+    {children}
+  </section>
+)
+
+const Pending = ({ children }: { children: ReactNode }) => <p className="text-sm text-muted">{children}</p>
+
+const Figure = ({
+  label,
+  value,
+  note,
+  valueClass = '',
+}: {
+  label: string
+  value: string
+  note?: string
+  valueClass?: string
+}) => (
+  <div className="flex flex-col gap-1">
+    <span className="smallcaps text-[11px] text-muted">{label}</span>
+    <span className={`font-serif text-[32px] leading-tight tabular-nums ${valueClass}`}>{value}</span>
+    {note && <span className="text-xs text-muted">{note}</span>}
+  </div>
+)
+
+const ActionButton = ({
+  onClick,
+  busy,
+  busyLabel,
+  title,
+  children,
+}: {
+  onClick: () => void
+  busy: boolean
+  busyLabel: string
+  title?: string
+  children: ReactNode
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={busy}
+    title={title}
+    className="flex h-9 items-center gap-1.5 border border-ink px-3 text-xs font-semibold transition-colors hover:bg-sand disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />
+    </svg>
+    {busy ? busyLabel : children}
+  </button>
+)
+
+const TableHead = ({ columns }: { columns: { label: string; className?: string }[] }) => (
+  <thead>
+    <tr className="smallcaps border-b border-ink text-[11px] text-muted">
+      {columns.map((column) => (
+        <th key={column.label} scope="col" className={`py-2 font-semibold ${column.className ?? 'text-left'}`}>
+          {column.label}
+        </th>
+      ))}
+    </tr>
+  </thead>
+)
+
+const ListBlock = ({ title, items, titleClass }: { title: string; items: string[]; titleClass: string }) =>
+  items.length > 0 ? (
+    <div className="flex flex-col gap-1.5">
+      <h3 className={`smallcaps text-[11px] ${titleClass}`}>{title}</h3>
+      <ul className="flex flex-col font-serif text-base leading-snug text-ink-soft">
+        {items.map((item, index) => (
+          <li key={`${index}-${item.slice(0, 20)}`} className="border-t border-line py-1.5">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  ) : null
+
+const priorityClass: Record<string, string> = {
+  High: 'font-bold text-ink',
+  Medium: 'text-ink-soft',
+  Low: 'text-muted',
+}
+
+const AllocationSection = ({
+  sectorAllocation,
+  analysis,
+  loading,
+}: {
+  sectorAllocation: SectorAllocation[]
+  analysis: SectorDiversificationAnalysis | null
+  loading: boolean
+}) => {
+  const sectors = [...sectorAllocation].sort((a, b) => b.amount - a.amount)
+
+  return (
+    <Section
+      id="alloc-h"
+      title="Where your money sits"
+      meta={analysis ? `Diversification ${analysis.score} / 100 · ${analysis.status}` : loading ? 'Analyzing…' : undefined}
+    >
+      <div className="grid gap-10 lg:grid-cols-2">
+        {sectors.length === 0 ? (
+          <Pending>No sector data yet.</Pending>
+        ) : (
+          <table className="w-full self-start border-collapse text-sm tabular-nums">
+            <TableHead
+              columns={[
+                { label: 'Sector' },
+                { label: 'Share', className: 'sr-only' },
+                { label: 'Weight', className: 'text-right' },
+                { label: 'Value', className: 'text-right' },
+              ]}
+            />
+            <tbody>
+              {sectors.map((sector) => (
+                <tr key={sector.name} className="border-b border-line">
+                  <th scope="row" className="py-2.5 pr-4 text-left font-semibold">
+                    {sector.name}
+                  </th>
+                  <td className="w-2/5 py-2.5">
+                    <span className="block h-1.5 bg-track">
+                      <span className="block h-1.5 bg-ink" style={{ width: `${Math.min(100, sector.percentage)}%` }} />
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-right">{sector.percentage.toFixed(1)}%</td>
+                  <td className="py-2.5 text-right">{cad(sector.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <div className="flex flex-col gap-4 lg:border-l lg:border-line lg:pl-8">
+          <span className="kicker text-accent">The AI’s read</span>
+          {analysis ? (
+            <>
+              <p className="dropcap font-serif text-lg leading-relaxed text-[#1e1e1e]">{analysis.summary}</p>
+              <ListBlock title="Working in your favour" items={analysis.strengths} titleClass="text-gain" />
+              <ListBlock title="Worth watching" items={analysis.risks} titleClass="text-loss" />
+            </>
+          ) : (
+            <Pending>{loading ? 'The AI is reviewing your diversification…' : 'No diversification analysis yet.'}</Pending>
+          )}
+        </div>
+      </div>
+
+      {analysis && analysis.suggestions.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="smallcaps text-xs">Suggested moves</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-sm tabular-nums">
+              <TableHead
+                columns={[
+                  { label: 'Move' },
+                  { label: 'Now → target', className: 'text-right' },
+                  { label: 'Priority', className: 'pl-6 text-left' },
+                  { label: 'Why', className: 'pl-6 text-left' },
+                ]}
+              />
+              <tbody>
+                {analysis.suggestions.map((suggestion, index) => (
+                  <tr key={`${suggestion.sector}-${index}`} className="border-b border-line align-top">
+                    <th scope="row" className="py-2.5 pr-4 text-left font-semibold">
+                      {suggestion.action} {suggestion.sector}
+                    </th>
+                    <td className="whitespace-nowrap py-2.5 text-right">
+                      {suggestion.currentPercentage.toFixed(1)}% → {suggestion.targetPercentage.toFixed(1)}%
+                    </td>
+                    <td className={`py-2.5 pl-6 ${priorityClass[suggestion.priority] ?? ''}`}>{suggestion.priority}</td>
+                    <td className="py-2.5 pl-6 font-serif text-[15px] leading-snug text-ink-soft">{suggestion.reasoning}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+const riskStatusClass: Record<RiskStatusType, string> = {
+  Good: 'text-gain',
+  Moderate: 'text-amber-ink',
+  'Needs Attention': 'text-loss',
+}
+
+type Reading = { text: string; className: string }
+const GOOD = 'text-gain'
+const OK = 'text-amber-ink'
+const BAD = 'text-loss'
+
+const readSharpe = (v?: number): Reading =>
+  v === undefined
+    ? { text: 'Unable to calculate', className: 'text-muted' }
+    : v >= 2
+      ? { text: 'Excellent risk-adjusted returns', className: GOOD }
+      : v >= 1
+        ? { text: 'Good risk-adjusted returns', className: GOOD }
+        : v >= 0.5
+          ? { text: 'Acceptable returns for risk taken', className: OK }
+          : { text: 'Poor risk-adjusted performance', className: BAD }
+
+const readBeta = (v: number): Reading =>
+  v < 0.8
+    ? { text: 'Conservative, defensive portfolio', className: 'text-accent' }
+    : v <= 1.2
+      ? { text: 'Market-aligned risk exposure', className: GOOD }
+      : v <= 1.5
+        ? { text: 'Above-market volatility', className: OK }
+        : { text: 'High market sensitivity', className: BAD }
+
+const readVolatility = (v: number): Reading =>
+  v < 15
+    ? { text: 'Low volatility, stable portfolio', className: GOOD }
+    : v <= 25
+      ? { text: 'Moderate volatility, balanced', className: OK }
+      : v <= 40
+        ? { text: 'High volatility, elevated risk', className: BAD }
+        : { text: 'Very high volatility, significant swings', className: BAD }
+
+const readVaR = (v: number): Reading =>
+  v > -2
+    ? { text: 'Low daily risk exposure', className: GOOD }
+    : v > -4
+      ? { text: 'Moderate daily risk', className: OK }
+      : v > -6
+        ? { text: 'Elevated daily risk', className: BAD }
+        : { text: 'High potential daily loss', className: BAD }
+
+const readDrawdown = (v: number): Reading =>
+  v > -10
+    ? { text: 'Well-protected portfolio', className: GOOD }
+    : v > -20
+      ? { text: 'Moderate drawdown risk', className: OK }
+      : v > -30
+        ? { text: 'Significant drawdown exposure', className: BAD }
+        : { text: 'High drawdown risk', className: BAD }
+
+const readInfoRatio = (v?: number): Reading =>
+  v === undefined
+    ? { text: 'Unable to calculate', className: 'text-muted' }
+    : v >= 1
+      ? { text: 'Strong benchmark outperformance', className: GOOD }
+      : v >= 0.5
+        ? { text: 'Moderate outperformance', className: GOOD }
+        : v >= 0
+          ? { text: 'Slight outperformance', className: OK }
+          : { text: 'Underperforming benchmark', className: BAD }
+
+const RiskSection = ({ riskMetrics }: { riskMetrics: RiskMetrics | null }) => {
+  if (!riskMetrics) {
+    return (
+      <Section small id="risk-h" title="Risk">
+        <Pending>Loading risk metrics…</Pending>
+      </Section>
+    )
+  }
+
+  const metrics: { label: string; value: string; description: string; explainer: string; reading: Reading }[] = [
+    {
+      label: 'Sharpe ratio',
+      value: riskMetrics.sharpeRatio?.toFixed(2) ?? 'N/A',
+      description: 'Risk-adjusted return',
+      explainer:
+        'Excess return per unit of risk: (portfolio return − risk-free rate) ÷ volatility. Above 1.0 is considered good, above 2.0 excellent.',
+      reading: readSharpe(riskMetrics.sharpeRatio),
+    },
+    {
+      label: 'Portfolio beta',
+      value: riskMetrics.portfolioBeta.toFixed(2),
+      description: 'vs the market',
+      explainer:
+        'Sensitivity to market moves. 1.0 moves with the market; below 1.0 is more defensive, above 1.0 more aggressive.',
+      reading: readBeta(riskMetrics.portfolioBeta),
+    },
+    {
+      label: 'Volatility',
+      value: `${riskMetrics.volatility.toFixed(1)}%`,
+      description: 'Annual standard deviation',
+      explainer:
+        'How far returns swing around their average, annualized. Lower means steadier returns; the S&P 500 typically runs near 15%.',
+      reading: readVolatility(riskMetrics.volatility),
+    },
+    {
+      label: 'Value at risk',
+      value: `${riskMetrics.valueAtRisk.toFixed(1)}%`,
+      description: '1 day, 95% confidence',
+      explainer:
+        'The loss you should exceed on only 1 day in 20 under normal conditions. −4.2% means a 5% chance of losing more than 4.2% in a day.',
+      reading: readVaR(riskMetrics.valueAtRisk),
+    },
+    {
+      label: 'Max drawdown',
+      value: `${riskMetrics.maxDrawdown.toFixed(1)}%`,
+      description: 'Peak to trough',
+      explainer: 'The largest fall from a peak to the following low. Closer to 0% means better downside protection.',
+      reading: readDrawdown(riskMetrics.maxDrawdown),
+    },
+    {
+      label: 'Information ratio',
+      value: riskMetrics.informationRatio?.toFixed(2) ?? 'N/A',
+      description: 'vs the S&P 500',
+      explainer:
+        'Excess return over the benchmark relative to tracking error. Above 0.5 is good, above 1.0 is excellent active management.',
+      reading: readInfoRatio(riskMetrics.informationRatio),
+    },
+  ]
+
+  return (
+    <Section
+      small
+      id="risk-h"
+      title="Risk"
+      meta={<span className={`smallcaps text-xs ${riskStatusClass[riskMetrics.riskStatus]}`}>{riskMetrics.riskStatus}</span>}
+    >
+      <div className="flex flex-col">
+        {metrics.map((metric) => (
+          <details key={metric.label} className="group border-b border-line py-2.5 first:border-t">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 [&::-webkit-details-marker]:hidden">
+              <span className="flex min-w-0 flex-col">
+                <span className="text-sm font-semibold">
+                  {metric.label} <span className="font-normal text-muted">· {metric.description}</span>
+                </span>
+                <span className={`text-xs ${metric.reading.className}`}>{metric.reading.text}</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="font-serif text-2xl tabular-nums">{metric.value}</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4 text-muted transition-transform group-open:rotate-180"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.75}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </span>
+            </summary>
+            <p className="pt-2 text-[13px] leading-relaxed text-ink-soft">{metric.explainer}</p>
+          </details>
+        ))}
+      </div>
+      <p className="text-xs text-muted">Select a metric to see what it measures.</p>
+    </Section>
+  )
+}
+
+const alertLabel: Record<AlertSeverityType, { label: string; className: string }> = {
+  info: { label: 'Note', className: 'text-accent' },
+  warning: { label: 'Caution', className: 'text-amber-ink' },
+  error: { label: 'Warning', className: 'text-loss' },
+}
+
+const MarketsSection = ({
+  sentiment,
+  loading,
+  refreshing,
+  onRefresh,
+}: {
+  sentiment: MarketSentiment | null
+  loading: boolean
+  refreshing: boolean
+  onRefresh: () => Promise<void>
+}) => (
+  <Section
+    small
+    id="mood-h"
+    title="Market mood"
+    action={
+      <ActionButton
+        onClick={onRefresh}
+        busy={refreshing || loading}
+        busyLabel="Refreshing…"
+        title="Refresh to get the latest VIX data"
+      >
+        Refresh
+      </ActionButton>
+    }
+  >
+    {!sentiment ? (
+      <Pending>{loading ? 'Loading market sentiment…' : 'No market sentiment yet.'}</Pending>
+    ) : (
+      <>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <span className="font-serif text-[52px] leading-none tabular-nums">{sentiment.fearGreedValue}</span>
+            <span className="flex flex-col">
+              <span className="text-sm font-semibold">{sentiment.fearGreedLabel}</span>
+              <span className="text-xs text-muted">Fear &amp; Greed Index</span>
+            </span>
+          </div>
+          <span className="relative block h-1.5 bg-track" aria-hidden="true">
+            <span
+              className="absolute top-1/2 h-3.5 w-1 -translate-x-1/2 -translate-y-1/2 bg-ink"
+              style={{ left: `${Math.min(100, Math.max(0, sentiment.fearGreedValue))}%` }}
+            />
+          </span>
+          <div className="flex justify-between text-[11px] text-muted">
+            <span>Extreme fear</span>
+            <span>Extreme greed</span>
+          </div>
+        </div>
+        <dl className="flex flex-col">
+          {[
+            { label: 'VIX', value: sentiment.vixValue.toFixed(1), status: sentiment.vixStatus },
+            { label: 'Put/call ratio', value: sentiment.putCallRatio.toFixed(2), status: sentiment.putCallStatus },
+            { label: 'Market breadth', value: `${sentiment.marketBreadth.toFixed(1)}%`, status: sentiment.marketBreadthStatus },
+          ].map((row) => (
+            <div key={row.label} className="flex items-center justify-between gap-4 border-t border-line py-2.5 last:border-b">
+              <dt className="flex flex-col">
+                <span className="text-sm font-semibold">{row.label}</span>
+                <span className="text-xs text-muted">{row.status}</span>
+              </dt>
+              <dd className="font-serif text-2xl tabular-nums">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {sentiment.alerts.length > 0 && (
+          <ul className="flex flex-col gap-2 text-sm leading-snug text-ink-soft">
+            {sentiment.alerts.map((alert, index) => (
+              <li key={`${index}-${alert.message.slice(0, 20)}`}>
+                <span className={`smallcaps mr-1.5 text-[11px] ${alertLabel[alert.severity].className}`}>
+                  {alertLabel[alert.severity].label}
+                </span>
+                {alert.message}
+              </li>
+            ))}
+          </ul>
+        )}
+      </>
+    )}
+  </Section>
+)
+
+const RebalancingSection = ({
+  rebalancing,
+  metadata,
+  loading,
+  onRefresh,
+}: {
+  rebalancing: RebalancingRecommendation[]
+  metadata: RebalancingMetadata | null
+  loading: boolean
+  onRefresh: () => Promise<void>
+}) => {
+  const [refreshing, setRefreshing] = useState(false)
+  const busy = refreshing || loading
+  const total = rebalancing.reduce((sum, rec) => sum + Math.abs(rec.amount), 0)
+
+  const regenerate = async () => {
+    setRefreshing(true)
+    try {
+      await onRefresh()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const meta = [
+    `${rebalancing.length} trades`,
+    `${cad(total)} CAD in total`,
+    metadata &&
+      `quality score ${metadata.evaluationScore}% after ${metadata.iterationCount} ${
+        metadata.iterationCount === 1 ? 'pass' : 'passes'
+      }`,
+    metadata?.evaluationPassed && 'passed review',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <Section
+      id="reb-h"
+      title="Rebalancing plan"
+      meta={meta}
+      action={
+        <ActionButton onClick={regenerate} busy={busy} busyLabel="Regenerating…">
+          Regenerate plan
+        </ActionButton>
+      }
+    >
+      {rebalancing.length === 0 ? (
+        <Pending>{busy ? 'Building a rebalancing plan…' : 'No trades suggested right now.'}</Pending>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse text-sm tabular-nums">
+            <TableHead
+              columns={[
+                { label: 'Holding' },
+                { label: 'Action' },
+                { label: 'Now → target', className: 'pl-6 text-right' },
+                { label: 'Amount', className: 'pl-6 text-right' },
+                { label: 'Risk', className: 'pl-6 text-left' },
+                { label: 'Why', className: 'pl-6 text-left' },
+              ]}
+            />
+            <tbody>
+              {rebalancing.map((rec) => {
+                const sell = rec.action === 'Sell'
+                return (
+                  <tr key={rec.symbol} className="border-b border-line align-top">
+                    <th scope="row" className="py-3 pr-4 text-left font-normal">
+                      <strong className="block font-bold">{rec.symbol}</strong>
+                      <span className="text-xs text-muted">{rec.name}</span>
+                    </th>
+                    <td className={`py-3 font-semibold ${sell ? 'text-loss' : 'text-gain'}`}>{sell ? 'Trim' : 'Add'}</td>
+                    <td className="whitespace-nowrap py-3 pl-6 text-right">
+                      {rec.currentAllocation.toFixed(1)}% → {rec.targetAllocation.toFixed(1)}%
+                    </td>
+                    <td className="whitespace-nowrap py-3 pl-6 text-right font-semibold">
+                      {rec.action} {cad(Math.abs(rec.amount))}
+                    </td>
+                    <td className="py-3 pl-6">{rec.risk}</td>
+                    <td className="py-3 pl-6 font-serif text-[15px] leading-snug text-ink-soft">{rec.reason}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+const TaxLossSection = ({ opportunities }: { opportunities: TaxLossHarvestingOpportunity[] }) => {
+  const totalLoss = opportunities.reduce((sum, o) => sum + Math.abs(o.unrealizedLoss), 0)
+  const totalSavings = opportunities.reduce((sum, o) => sum + o.taxSavings, 0)
+
+  return (
+    <Section
+      id="tlh-h"
+      title="Tax-loss harvesting"
+      meta={
+        opportunities.length
+          ? `${opportunities.length} opportunities · ${cad(-totalLoss)} unrealized · ${cad(totalSavings)} est. savings`
+          : undefined
+      }
+    >
+      {opportunities.length === 0 ? (
+        <Pending>No tax-loss harvesting opportunities. Every holding is at a gain or break-even.</Pending>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse text-sm tabular-nums">
+              <TableHead
+                columns={[
+                  { label: 'Holding' },
+                  { label: 'Unrealized loss', className: 'pl-6 text-right' },
+                  { label: 'Below cost', className: 'pl-6 text-right' },
+                  { label: 'Est. savings', className: 'pl-6 text-right' },
+                  { label: 'Now worth', className: 'pl-6 text-right' },
+                  { label: 'Swap ideas', className: 'pl-6 text-left' },
+                  { label: 'Superficial-loss risk', className: 'pl-6 text-right' },
+                ]}
+              />
+              <tbody>
+                {opportunities.map((opp) => (
+                  <tr key={opp.symbol} className="border-b border-line align-top">
+                    <th scope="row" className="py-3 pr-4 text-left font-normal">
+                      <strong className="block font-bold">{opp.symbol}</strong>
+                      <span className="text-xs text-muted">{opp.name}</span>
+                    </th>
+                    <td className="py-3 pl-6 text-right font-semibold text-loss">{cad(-Math.abs(opp.unrealizedLoss))}</td>
+                    <td className="py-3 pl-6 text-right">{Math.abs(opp.lossPercentage).toFixed(1)}%</td>
+                    <td className="py-3 pl-6 text-right font-semibold text-gain">{cad(opp.taxSavings)}</td>
+                    <td className="py-3 pl-6 text-right">{cad(opp.currentValue)}</td>
+                    <td className="py-3 pl-6">
+                      {opp.replacementOptions.length === 0 ? (
+                        <span className="text-muted">None suggested</span>
+                      ) : (
+                        <ul className="flex flex-col gap-1">
+                          {opp.replacementOptions.map((option) => (
+                            <li key={option.symbol} title={option.reason}>
+                              <strong className="font-semibold">{option.symbol}</strong>{' '}
+                              <span className="text-muted">{option.name}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                    <td className="py-3 pl-6 text-right">{opp.washSaleRisk}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted">
+            Mind the superficial-loss rule: don’t rebuy the same security within 30 days before or after the sale.
+            Hover a swap idea for the AI’s reasoning.
+          </p>
+        </>
+      )}
+    </Section>
+  )
+}
+
+const concentrationCopy: Record<string, { text: string; className: string }> = {
+  High: {
+    text: 'High concentration: several positions exceed recommended limits. Consider rebalancing.',
+    className: 'text-loss',
+  },
+  Moderate: {
+    text: 'Moderate concentration: some positions exceed recommended limits. Keep an eye on them.',
+    className: 'text-amber-ink',
+  },
+  Healthy: {
+    text: 'Healthy concentration: positions sit within recommended sizing guidelines.',
+    className: 'text-gain',
+  },
+}
+
+const PositionSizingSection = ({ positionSizing }: { positionSizing: PositionSizingAnalysisType | null }) => {
+  if (!positionSizing) {
+    return (
+      <Section small id="size-h" title="Position sizing">
+        <Pending>Loading position sizing…</Pending>
+      </Section>
+    )
+  }
+
+  const { top3Percentage, top5Percentage, concentrationLevel, topHoldings, warnings, guidelines } = positionSizing
+  const copy = concentrationCopy[concentrationLevel] ?? concentrationCopy.Healthy
+
+  return (
+    <Section small id="size-h" title="Position sizing" meta={concentrationLevel}>
+      <div className="grid grid-cols-2 gap-5">
+        <Figure label="Top 3 holdings" value={`${top3Percentage.toFixed(1)}%`} note="of the portfolio" />
+        <Figure label="Top 5 holdings" value={`${top5Percentage.toFixed(1)}%`} note="of the portfolio" />
+      </div>
+      <table className="w-full border-collapse text-sm tabular-nums">
+        <TableHead
+          columns={[
+            { label: 'Rank' },
+            { label: 'Holding' },
+            { label: 'Share', className: 'sr-only' },
+            { label: 'Weight', className: 'text-right' },
+            { label: 'Value', className: 'text-right' },
+          ]}
+        />
+        <tbody>
+          {topHoldings.map((holding, index) => (
+            <tr key={holding.symbol} className="border-b border-line">
+              <td className="py-2 text-muted">{index + 1}</td>
+              <th scope="row" className="py-2 pr-4 text-left font-bold">
+                {holding.symbol}
+              </th>
+              <td className="w-2/5 py-2">
+                <span className="block h-1.5 bg-track">
+                  <span className="block h-1.5 bg-ink" style={{ width: `${Math.min(100, holding.percentage * 4)}%` }} />
+                </span>
+              </td>
+              <td className="py-2 text-right">{holding.percentage.toFixed(1)}%</td>
+              <td className="py-2 text-right">{cad(holding.amountCad)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(warnings.length > 0 || concentrationLevel !== 'Healthy') && (
+        <div className="flex flex-col gap-1.5">
+          <p className={`text-sm font-semibold ${copy.className}`}>{copy.text}</p>
+          {warnings.length > 0 && (
+            <ul className="flex flex-col gap-1 text-[13px] text-ink-soft">
+              {warnings.map((warning, index) => (
+                <li key={`${index}-${warning.slice(0, 20)}`}>{warning}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {guidelines.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h3 className="smallcaps text-[11px] text-muted">Guidelines</h3>
+          <ul className="flex flex-col gap-1 text-[13px] text-ink-soft">
+            {guidelines.map((guideline, index) => (
+              <li key={`${index}-${guideline.description.slice(0, 20)}`}>
+                {guideline.description}
+                {guideline.threshold !== null && ` (${guideline.threshold}% limit)`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+const DividendSection = ({ dividendIncome }: { dividendIncome: DividendIncomeData | null }) => {
+  if (!dividendIncome) {
+    return (
+      <Section small id="div-h" title="Dividend income">
+        <Pending>Loading dividend data…</Pending>
+      </Section>
+    )
+  }
+
+  const { annualIncome, quarterlyIncome, monthlyIncome, portfolioYield, dividendHoldings, incomeProjectionText, investmentTipText } =
+    dividendIncome
+
+  return (
+    <Section small id="div-h" title="Dividend income" meta={`${portfolioYield.toFixed(2)}% portfolio yield`}>
+      <div className="grid grid-cols-3 gap-5">
+        <Figure label="Annual" value={cad(annualIncome)} />
+        <Figure label="Quarterly" value={cad(quarterlyIncome)} />
+        <Figure label="Monthly" value={cad(monthlyIncome)} />
+      </div>
+      {dividendHoldings.length === 0 ? (
+        <p className="font-serif text-lg leading-relaxed text-ink-soft">
+          No dividend-paying holdings were found in your portfolio. Dividend stocks or ETFs would add a passive income
+          stream.
+        </p>
+      ) : (
+        <>
+          <table className="w-full border-collapse text-sm tabular-nums">
+            <TableHead
+              columns={[
+                { label: 'Holding' },
+                { label: 'Yield', className: 'text-right' },
+                { label: 'Per year', className: 'text-right' },
+              ]}
+            />
+            <tbody>
+              {dividendHoldings.map((holding) => (
+                <tr key={holding.symbol} className="border-b border-line">
+                  <th scope="row" className="py-2 pr-4 text-left font-normal">
+                    <strong className="font-bold">{holding.symbol}</strong>{' '}
+                    <span className="text-muted">{holding.name}</span>
+                  </th>
+                  <td className="py-2 text-right">{holding.dividendYield.toFixed(2)}%</td>
+                  <td className="py-2 text-right">{cad(holding.annualDividend)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {incomeProjectionText && (
+            <p className="font-serif text-base leading-relaxed text-ink-soft">
+              <strong className="font-semibold text-ink">Five-year outlook:</strong> {incomeProjectionText}
+            </p>
+          )}
+          {investmentTipText && (
+            <p className="font-serif text-base leading-relaxed text-ink-soft">
+              <strong className="font-semibold text-ink">Tip:</strong> {investmentTipText}
+            </p>
+          )}
+        </>
+      )}
+    </Section>
+  )
+}
+
 export const Analytics = ({ onBackToPortfolio }: { onBackToPortfolio: () => void }) => {
   const { holdings, summary, loading: portfolioLoading, error: portfolioError } = usePortfolio()
-  
+
   const holdingsHash = useMemo(() => {
-    return JSON.stringify(holdings.map(h => ({ id: h.id, symbol: h.symbol, amountCad: h.amountCad })))
+    return JSON.stringify(holdings.map((h) => ({ id: h.id, symbol: h.symbol, amountCad: h.amountCad })))
   }, [holdings])
-  
+
   const {
     performance,
     sectorAllocation: apiSectorAllocation,
@@ -686,1236 +1070,137 @@ export const Analytics = ({ onBackToPortfolio }: { onBackToPortfolio: () => void
     loading: analyticsLoading,
     error: analyticsError,
   } = useAnalyticsHook(holdingsHash)
-  const {
-    performanceHistory,
-    loading: historyLoading,
-  } = usePerformanceHistory(6, holdingsHash)
+  const { performanceHistory, loading: historyLoading } = usePerformanceHistory(6, holdingsHash)
 
   const loading = portfolioLoading || analyticsLoading
   const error = portfolioError || analyticsError
 
   if (loading && !summary) {
-    return (
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-slate-600">Loading analytics data...</div>
-        </div>
-      </div>
-    )
+    return <div className="flex items-center justify-center py-12 text-muted">Loading analytics data...</div>
   }
 
   if (error) {
     return (
-      <div className="flex flex-col gap-6">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-semibold text-red-800">Error loading analytics data</p>
-          <p className="mt-1 text-sm text-red-700">{error.message}</p>
-        </div>
+      <div className="bg-[#fbe9e6] p-4 text-[#9e2a17]">
+        <p className="text-sm font-semibold">Error loading analytics data</p>
+        <p className="mt-1 text-sm">{error.message}</p>
       </div>
     )
   }
 
   if (!summary) {
-    return (
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-slate-600">No analytics data available</div>
-        </div>
-      </div>
-    )
+    return <div className="flex items-center justify-center py-12 text-muted">No analytics data available</div>
   }
 
   const totalValue = summary.totalValueCad
-  const totalGain = summary.totalGainCad
-  const totalGainPct = summary.totalGainPct
-
   const annualDividendIncome = performance?.annualDividendIncome ?? 0
-  const dividendYield = performance?.dividendYield ?? (annualDividendIncome / totalValue) * 100
-
-  const stockCount = holdings.filter((h) => h.category === 'Stocks').length
-  const etfCount = holdings.filter((h) => h.category === 'ETFs').length
-  const cryptoCount = holdings.filter((h) => h.category === 'Crypto').length
-  const totalHoldings = holdings.length
+  const dividendYield = performance?.dividendYield ?? (totalValue ? (annualDividendIncome / totalValue) * 100 : 0)
+  const countBy = (category: string) => holdings.filter((h) => h.category === category).length
 
   const portfolioReturn = performanceHistory?.portfolioReturn ?? performance?.portfolioReturn ?? 0
   const sp500Return = performanceHistory?.sp500Return ?? performance?.sp500Return ?? 0
-  const outperformance = performanceHistory?.outperformance ?? performance?.outperformance ?? portfolioReturn - sp500Return
+  const outperformance =
+    performanceHistory?.outperformance ?? performance?.outperformance ?? portfolioReturn - sp500Return
+  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-6 md:grid-cols-3">
-        <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium text-slate-600">Total Portfolio Value</div>
-          <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalValue)}</div>
-          <div className={`text-sm font-semibold ${totalGain >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {formatCurrency(totalGain)} ({formatPercent(totalGainPct)})
-          </div>
-        </div>
+    <div className="flex flex-col gap-12">
+      <header className="flex flex-col gap-4 lg:max-w-[72%]">
+        <button
+          type="button"
+          onClick={onBackToPortfolio}
+          className="smallcaps self-start text-xs text-accent hover:text-accent-dark"
+        >
+          ← Back to the front page
+        </button>
+        <span className="kicker text-accent">Analysis desk</span>
+        <h1 className="font-serif text-[40px] font-medium leading-[1.05] tracking-[-0.5px] text-balance md:text-[56px]">
+          {riskMetrics
+            ? `Risk rated “${riskMetrics.riskStatus.toLowerCase()}” across ${holdings.length} holdings`
+            : 'Portfolio analysis'}
+        </h1>
+        {riskMetrics?.riskAssessment && (
+          <p className="font-serif text-[21px] italic leading-snug text-[#3a3a3a] text-pretty">
+            {riskMetrics.riskAssessment}
+          </p>
+        )}
+        <span className="text-[13px] text-muted">AI review · updated {today}</span>
+      </header>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium text-slate-600">Annual Dividend Income</div>
-          <div className="text-3xl font-bold text-slate-900">
-            {formatCurrency(annualDividendIncome)}
-          </div>
-          <div className="text-sm font-medium text-slate-600">
-            {dividendYield.toFixed(2)}% yield
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium text-slate-600">Number of Holdings</div>
-          <div className="text-3xl font-bold text-slate-900">{totalHoldings}</div>
-          <div className="text-sm font-medium text-slate-600">
-            {stockCount} stocks, {etfCount} ETFs, {cryptoCount} crypto
-          </div>
-        </div>
-      </div>
-
-      <button
-        type="button"
-        onClick={onBackToPortfolio}
-        className="text-sm font-semibold text-slate-900 underline underline-offset-4 hover:text-slate-700 w-fit"
+      <section
+        aria-label="By the numbers"
+        className="grid grid-cols-2 gap-x-6 gap-y-5 border-y border-ink py-5 md:grid-cols-3 xl:grid-cols-6"
       >
-        &lt; Back to Portfolio
-      </button>
-
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 shadow-sm">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">Portfolio Performance</h2>
-
-        <div className="mb-6 flex flex-wrap items-center gap-6">
-          <div className="text-sm text-slate-700">
-            Your Portfolio: <span className={`font-semibold ${portfolioReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(portfolioReturn)}</span>
-          </div>
-          <div className="text-sm text-slate-700">
-            S&P 500: <span className={`font-semibold ${sp500Return >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(sp500Return)}</span>
-          </div>
-          <div className="text-sm text-slate-700">
-            Outperformance:{' '}
-            <span className={`font-semibold ${outperformance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {formatPercent(outperformance)}
-            </span>
-          </div>
-        </div>
-
-        <PortfolioPerformanceChart 
-          dataPoints={performanceHistory?.dataPoints ?? []}
-          loading={historyLoading}
+        <Figure label="Portfolio value" value={cad(totalValue)} note="CAD" />
+        <Figure
+          label="All-time"
+          value={cad(summary.totalGainCad)}
+          note={signedPct(summary.totalGainPct, 1)}
+          valueClass={tone(summary.totalGainCad)}
         />
+        <Figure
+          label="6M vs S&P 500"
+          value={`${outperformance >= 0 ? '+' : MINUS}${Math.abs(outperformance).toFixed(2)} pts`}
+          note={`You ${signedPct(portfolioReturn)} · S&P ${signedPct(sp500Return)}`}
+          valueClass={tone(outperformance)}
+        />
+        <Figure label="Dividend income" value={cad(annualDividendIncome)} note={`${dividendYield.toFixed(2)}% yield`} />
+        <Figure
+          label="Holdings"
+          value={String(holdings.length)}
+          note={`${countBy('Stocks')} stocks · ${countBy('ETFs')} ETFs · ${countBy('Crypto')} crypto`}
+        />
+        <Figure
+          label="Diversification"
+          value={sectorDiversification ? String(sectorDiversification.score) : '—'}
+          note={sectorDiversification ? `${sectorDiversification.status} · out of 100` : 'Analyzing…'}
+        />
+      </section>
 
-        <div className="mt-4 flex items-center justify-center gap-6 text-xs text-slate-600">
-          <div className="flex items-center gap-2">
-            <div className="h-0.5 w-8 bg-blue-500"></div>
-            <span>Your Portfolio</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-0.5 w-8 border-t-2 border-dashed border-slate-400"></div>
-            <span>S&P 500</span>
-          </div>
-        </div>
-      </div>
+      <Section
+        id="perf-h"
+        title="Six months against the market"
+        meta={`You ${signedPct(portfolioReturn)} · S&P 500 ${signedPct(sp500Return)}`}
+      >
+        <PortfolioPerformanceChart dataPoints={performanceHistory?.dataPoints ?? []} loading={historyLoading} />
+        <p className="text-xs text-muted">
+          Solid line: your portfolio. Dashed line: the S&amp;P 500, rebased to your starting value.
+        </p>
+      </Section>
 
-      <SectorAllocationChart 
-        sectorAllocation={apiSectorAllocation} 
-        diversificationAnalysis={sectorDiversification}
-        diversificationLoading={sectorDiversificationLoading}
+      <AllocationSection
+        sectorAllocation={apiSectorAllocation}
+        analysis={sectorDiversification}
+        loading={sectorDiversificationLoading}
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <RiskAnalytics 
-          riskMetrics={riskMetrics} 
-          marketSentiment={marketSentiment}
-          marketSentimentLoading={marketSentimentLoading}
-          marketSentimentRefreshing={marketSentimentRefreshing}
-          onRefreshMarketSentiment={refetchMarketSentiment}
-        />
-        <PortfolioRebalancing 
-          rebalancing={rebalancing} 
-          rebalancingMetadata={rebalancingMetadata} 
-          rebalancingLoading={rebalancingLoading}
-          onRefreshRebalancing={refetchRebalancing}
-          taxLossHarvesting={taxLossHarvesting} 
+      <div className="grid gap-12 lg:grid-cols-2 lg:gap-10">
+        <RiskSection riskMetrics={riskMetrics} />
+        <MarketsSection
+          sentiment={marketSentiment}
+          loading={marketSentimentLoading || !riskMetrics}
+          refreshing={marketSentimentRefreshing}
+          onRefresh={refetchMarketSentiment}
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <PositionSizingAnalysis positionSizing={positionSizing} />
-        <DividendIncomeTracker dividendIncome={dividendIncome} />
-      </div>
-    </div>
-  )
-}
+      <RebalancingSection
+        rebalancing={rebalancing}
+        metadata={rebalancingMetadata}
+        loading={rebalancingLoading}
+        onRefresh={refetchRebalancing}
+      />
 
-const PositionSizingAnalysis = ({
-  positionSizing,
-}: {
-  positionSizing: PositionSizingAnalysisType | null
-}) => {
-  if (!positionSizing) {
-    return (
-      <div className="flex flex-col gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Position Sizing Analysis</h2>
-        <div className="text-sm text-slate-600">Loading position sizing data...</div>
-      </div>
-    )
-  }
+      <TaxLossSection opportunities={taxLossHarvesting} />
 
-  const { top3Percentage, top5Percentage, concentrationLevel, topHoldings, warnings, guidelines } =
-    positionSizing
-
-  const getBarColor = (index: number) => {
-    return index < 2 ? 'bg-yellow-500' : 'bg-blue-500'
-  }
-
-  const getConcentrationColor = () => {
-    switch (concentrationLevel) {
-      case 'High':
-        return 'border-red-200 bg-red-50 text-red-800'
-      case 'Moderate':
-        return 'border-yellow-200 bg-yellow-50 text-yellow-800'
-      default:
-        return 'border-green-200 bg-green-50 text-green-800'
-    }
-  }
-
-  const getConcentrationMessage = () => {
-    switch (concentrationLevel) {
-      case 'High':
-        return 'High Concentration Risk. Multiple positions exceed recommended thresholds. Consider rebalancing to reduce risk.'
-      case 'Moderate':
-        return 'Moderate Concentration. Some positions exceed recommended thresholds. Monitor closely and consider rebalancing.'
-      default:
-        return 'Healthy Concentration. Portfolio is well-diversified within recommended position sizing guidelines.'
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">Position Sizing Analysis</h2>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs font-medium text-slate-600 mb-1">Top 3 Holdings</div>
-          <div className="text-2xl font-bold text-slate-900">{top3Percentage.toFixed(1)}%</div>
-          <div className="text-xs text-slate-500">of portfolio</div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs font-medium text-slate-600 mb-1">Top 5 Holdings</div>
-          <div className="text-2xl font-bold text-slate-900">{top5Percentage.toFixed(1)}%</div>
-          <div className="text-xs text-slate-500">of portfolio</div>
-        </div>
+      <div className="grid gap-12 lg:grid-cols-2 lg:gap-10">
+        <PositionSizingSection positionSizing={positionSizing} />
+        <DividendSection dividendIncome={dividendIncome} />
       </div>
 
-      <div>
-        <h3 className="mb-4 text-sm font-semibold text-slate-900">Top Holdings</h3>
-        <div className="flex flex-col gap-3">
-          {topHoldings.map((holding, index) => {
-            return (
-              <div key={holding.symbol} className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-600">#{index + 1}</span>
-                  <span className="text-sm font-bold text-slate-900">{holding.symbol}</span>
-                  {index < 2 && (
-                    <svg
-                      className="h-3 w-3 text-yellow-500"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                    </svg>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <div className="mb-1 flex items-center justify-between text-xs">
-                    <span className="text-slate-600">{holding.percentage.toFixed(1)}%</span>
-                    <span className="font-semibold text-slate-900">
-                      {formatCurrencyShort(holding.amountCad)}
-                    </span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      className={`h-full ${getBarColor(index)} transition-all`}
-                      style={{ width: `${Math.min(holding.percentage, 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {(warnings.length > 0 || concentrationLevel !== 'Healthy') && (
-        <div className={`rounded-md border p-4 ${getConcentrationColor()}`}>
-          <div className="flex items-start gap-3">
-            <svg
-              className="h-5 w-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">{getConcentrationMessage()}</p>
-              {warnings.length > 0 && (
-                <ul className="mt-2 list-disc list-inside text-xs space-y-1">
-                  {warnings.map((warning, idx) => (
-                    <li key={`warning-${idx}-${warning.slice(0, 20).replace(/\s+/g, '-')}`}>{warning}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-slate-900">Position Sizing Guidelines</h3>
-        <ul className="flex flex-col gap-2 text-xs text-slate-700">
-          {guidelines.map((guideline, idx) => (
-            <li key={`guideline-${idx}-${guideline.description.slice(0, 20)}`} className="flex items-start gap-2">
-              <span className="mt-0.5">•</span>
-              <span>
-                {guideline.description}
-                {guideline.threshold !== null && ` (${guideline.threshold}% threshold)`}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  )
-}
-
-const DividendIncomeTracker = ({
-  dividendIncome,
-}: {
-  dividendIncome: DividendIncomeData | null
-}) => {
-  if (!dividendIncome) {
-    return (
-      <div className="flex flex-col gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">$ Dividend Income Tracker</h2>
-        <div className="text-sm text-slate-600">Loading dividend data...</div>
-      </div>
-    )
-  }
-
-  const {
-    annualIncome,
-    quarterlyIncome,
-    monthlyIncome,
-    portfolioYield,
-    dividendHoldings,
-    incomeProjectionText,
-    investmentTipText,
-  } = dividendIncome
-
-  const hasDividendHoldings = dividendHoldings.length > 0
-
-  return (
-    <div className="flex flex-col gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">$ Dividend Income Tracker</h2>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4">
-          <div className="text-xs font-medium text-green-600 mb-1">Annual</div>
-          <div className="text-xl font-bold text-green-900">{formatCurrency(annualIncome)}</div>
-        </div>
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-          <div className="text-xs font-medium text-blue-600 mb-1">Quarterly</div>
-          <div className="text-xl font-bold text-blue-900">{formatCurrency(quarterlyIncome)}</div>
-        </div>
-        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
-          <div className="text-xs font-medium text-purple-600 mb-1">Monthly</div>
-          <div className="text-xl font-bold text-purple-900">{formatCurrency(monthlyIncome)}</div>
-        </div>
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
-          <div className="text-xs font-medium text-orange-600 mb-1">Portfolio Yield</div>
-          <div className="text-xl font-bold text-orange-900">{portfolioYield.toFixed(2)}%</div>
-        </div>
-      </div>
-
-      {hasDividendHoldings && (
-        <div>
-          <h3 className="mb-4 text-sm font-semibold text-slate-900">Dividend Paying Holdings</h3>
-          <div className="flex flex-col gap-3">
-            {dividendHoldings.map((holding) => (
-              <div
-                key={holding.symbol}
-                className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3"
-              >
-                <div className="flex-1">
-                  <div className="text-sm font-bold text-slate-900">{holding.symbol}</div>
-                  <div className="text-xs text-slate-600">{holding.name}</div>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <div className="text-xs font-medium text-slate-600">Yield</div>
-                    <div className="text-sm font-semibold text-slate-900">{holding.dividendYield.toFixed(2)}%</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs font-medium text-slate-600">Annual</div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      {formatCurrency(holding.annualDividend)}/yr
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!hasDividendHoldings && (
-        <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-          <p className="text-sm text-slate-600">
-            No dividend-paying holdings in your portfolio. Consider adding dividend stocks or ETFs to generate passive income.
-          </p>
-        </div>
-      )}
-
-      {hasDividendHoldings && (
-        <>
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <div className="flex items-start gap-3">
-              <svg
-                className="h-5 w-5 flex-shrink-0 text-blue-600"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              <div>
-                <div className="text-sm font-semibold text-blue-900 mb-1">5-Year Income Projection</div>
-                <p className="text-xs text-blue-800">
-                  {incomeProjectionText}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-start gap-3">
-              <svg
-                className="h-5 w-5 flex-shrink-0 text-slate-600"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              <div>
-                <div className="text-sm font-semibold text-slate-900 mb-1">Tip</div>
-                <p className="text-xs text-slate-700">
-                  {investmentTipText}
-                </p>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-type RiskStatusType = 'Good' | 'Moderate' | 'Needs Attention'
-
-const getRiskStatusStyle = (status: RiskStatusType) => {
-  switch (status) {
-    case 'Good':
-      return 'bg-green-100 text-green-700'
-    case 'Moderate':
-      return 'bg-yellow-100 text-yellow-700'
-    case 'Needs Attention':
-      return 'bg-red-100 text-red-700'
-    default:
-      return 'bg-slate-100 text-slate-700'
-  }
-}
-
-const getRiskAssessmentStyle = (status: RiskStatusType) => {
-  switch (status) {
-    case 'Good':
-      return 'border-green-200 bg-green-50'
-    case 'Moderate':
-      return 'border-yellow-200 bg-yellow-50'
-    case 'Needs Attention':
-      return 'border-red-200 bg-red-50'
-    default:
-      return 'border-slate-200 bg-slate-50'
-  }
-}
-
-const getRiskAssessmentIconColor = (status: RiskStatusType) => {
-  switch (status) {
-    case 'Good':
-      return 'text-green-600'
-    case 'Moderate':
-      return 'text-yellow-600'
-    case 'Needs Attention':
-      return 'text-red-600'
-    default:
-      return 'text-slate-600'
-  }
-}
-
-interface RiskMetricInfo {
-  label: string
-  value: string
-  description: string
-  tooltip: string
-  valueInterpretation: string
-  interpretationColor: string
-}
-
-const getSharpeInterpretation = (value: number | undefined): { text: string; color: string } => {
-  if (value === undefined) return { text: 'Unable to calculate', color: 'text-slate-500' }
-  if (value >= 2.0) return { text: 'Excellent risk-adjusted returns', color: 'text-green-600' }
-  if (value >= 1.0) return { text: 'Good risk-adjusted returns', color: 'text-green-600' }
-  if (value >= 0.5) return { text: 'Acceptable returns for risk taken', color: 'text-yellow-600' }
-  return { text: 'Poor risk-adjusted performance', color: 'text-red-600' }
-}
-
-const getBetaInterpretation = (value: number): { text: string; color: string } => {
-  if (value < 0.8) return { text: 'Conservative/defensive portfolio', color: 'text-blue-600' }
-  if (value <= 1.2) return { text: 'Market-aligned risk exposure', color: 'text-green-600' }
-  if (value <= 1.5) return { text: 'Above-market volatility', color: 'text-yellow-600' }
-  return { text: 'High market sensitivity', color: 'text-red-600' }
-}
-
-const getVolatilityInterpretation = (value: number): { text: string; color: string } => {
-  if (value < 15) return { text: 'Low volatility - stable portfolio', color: 'text-green-600' }
-  if (value <= 25) return { text: 'Moderate volatility - balanced', color: 'text-yellow-600' }
-  if (value <= 40) return { text: 'High volatility - elevated risk', color: 'text-orange-600' }
-  return { text: 'Very high volatility - significant swings', color: 'text-red-600' }
-}
-
-const getVaRInterpretation = (value: number): { text: string; color: string } => {
-  if (value > -2) return { text: 'Low daily risk exposure', color: 'text-green-600' }
-  if (value > -4) return { text: 'Moderate daily risk', color: 'text-yellow-600' }
-  if (value > -6) return { text: 'Elevated daily risk', color: 'text-orange-600' }
-  return { text: 'High potential daily loss', color: 'text-red-600' }
-}
-
-const getDrawdownInterpretation = (value: number): { text: string; color: string } => {
-  if (value > -10) return { text: 'Well-protected portfolio', color: 'text-green-600' }
-  if (value > -20) return { text: 'Moderate drawdown risk', color: 'text-yellow-600' }
-  if (value > -30) return { text: 'Significant drawdown exposure', color: 'text-orange-600' }
-  return { text: 'High drawdown risk', color: 'text-red-600' }
-}
-
-const getInfoRatioInterpretation = (value: number | undefined): { text: string; color: string } => {
-  if (value === undefined) return { text: 'Unable to calculate', color: 'text-slate-500' }
-  if (value >= 1.0) return { text: 'Strong benchmark outperformance', color: 'text-green-600' }
-  if (value >= 0.5) return { text: 'Moderate outperformance', color: 'text-green-600' }
-  if (value >= 0) return { text: 'Slight outperformance', color: 'text-yellow-600' }
-  return { text: 'Underperforming benchmark', color: 'text-red-600' }
-}
-
-const RiskMetricCard = ({ metric }: { metric: RiskMetricInfo }) => {
-  const [isHovered, setIsHovered] = useState(false)
-
-  return (
-    <div
-      className="group relative flex flex-col gap-1 rounded-lg border border-slate-200 bg-white p-4 transition-all hover:border-slate-300 hover:shadow-md cursor-help"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      <div className="flex items-center gap-1.5">
-        <div className="text-xs font-medium text-slate-600">{metric.label}</div>
-        <svg
-          className="h-3.5 w-3.5 text-slate-400 group-hover:text-slate-600 transition-colors"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
-      <div className="text-xl font-bold text-slate-900">{metric.value}</div>
-      <div className="text-xs text-slate-500">{metric.description}</div>
-      <div className={`text-xs font-medium mt-1 ${metric.interpretationColor}`}>
-        {metric.valueInterpretation}
-      </div>
-
-      {isHovered && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-72 animate-in fade-in zoom-in-95 duration-200">
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
-            <div className="flex items-start gap-2 mb-2">
-              <svg className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              <div>
-                <p className="font-semibold text-slate-900 text-sm">{metric.label}</p>
-                <p className="text-xs text-slate-600 mt-1 leading-relaxed">{metric.tooltip}</p>
-              </div>
-            </div>
-            <div className="border-t border-slate-100 pt-2 mt-2">
-              <p className="text-xs text-slate-500">
-                <span className="font-medium">Your value:</span> <span className="font-semibold text-slate-700">{metric.value}</span>
-              </p>
-              <p className={`text-xs font-medium mt-1 ${metric.interpretationColor}`}>
-                → {metric.valueInterpretation}
-              </p>
-            </div>
-            <div className="absolute left-1/2 -translate-x-1/2 top-full w-3 h-3 bg-white border-r border-b border-slate-200 transform rotate-45 -mt-1.5"></div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-const RiskAnalytics = ({
-  riskMetrics: apiRiskMetrics,
-  marketSentiment,
-  marketSentimentLoading,
-  marketSentimentRefreshing,
-  onRefreshMarketSentiment,
-}: {
-  riskMetrics: {
-    portfolioBeta: number
-    volatility: number
-    valueAtRisk: number
-    maxDrawdown: number
-    sharpeRatio?: number
-    informationRatio?: number
-    riskStatus?: RiskStatusType
-    riskAssessment?: string
-  } | null
-  marketSentiment: MarketSentiment | null
-  marketSentimentLoading: boolean
-  marketSentimentRefreshing: boolean
-  onRefreshMarketSentiment: () => Promise<void>
-}) => {
-  const riskStatus: RiskStatusType = apiRiskMetrics?.riskStatus ?? 'Moderate'
-  const riskAssessment = apiRiskMetrics?.riskAssessment
-
-  const sharpeInterp = getSharpeInterpretation(apiRiskMetrics?.sharpeRatio)
-  const betaInterp = getBetaInterpretation(apiRiskMetrics?.portfolioBeta ?? 1)
-  const volInterp = getVolatilityInterpretation(apiRiskMetrics?.volatility ?? 20)
-  const varInterp = getVaRInterpretation(apiRiskMetrics?.valueAtRisk ?? -3)
-  const ddInterp = getDrawdownInterpretation(apiRiskMetrics?.maxDrawdown ?? -15)
-  const infoInterp = getInfoRatioInterpretation(apiRiskMetrics?.informationRatio)
-
-  const riskMetrics: RiskMetricInfo[] = apiRiskMetrics
-    ? [
-        {
-          label: 'Sharpe Ratio',
-          value: apiRiskMetrics.sharpeRatio?.toFixed(2) ?? 'N/A',
-          description: 'Risk-adjusted return',
-          tooltip: 'Measures excess return per unit of risk. Calculated as (Portfolio Return - Risk-Free Rate) / Portfolio Volatility. Higher values indicate better risk-adjusted performance. Above 1.0 is considered good, above 2.0 is excellent.',
-          valueInterpretation: sharpeInterp.text,
-          interpretationColor: sharpeInterp.color,
-        },
-        {
-          label: 'Portfolio Beta',
-          value: apiRiskMetrics.portfolioBeta.toFixed(2),
-          description: 'vs Market',
-          tooltip: 'Measures portfolio sensitivity to market movements. Beta of 1.0 means your portfolio moves with the market. Below 1.0 is less volatile than the market (defensive), above 1.0 is more volatile (aggressive).',
-          valueInterpretation: betaInterp.text,
-          interpretationColor: betaInterp.color,
-        },
-        {
-          label: 'Volatility',
-          value: `${apiRiskMetrics.volatility.toFixed(1)}%`,
-          description: 'Annual std dev',
-          tooltip: 'Annualized standard deviation of portfolio returns, measuring how much returns deviate from the average. Lower volatility means more predictable returns. S&P 500 typically has ~15% annual volatility.',
-          valueInterpretation: volInterp.text,
-          interpretationColor: volInterp.color,
-        },
-        {
-          label: 'Value at Risk',
-          value: `${apiRiskMetrics.valueAtRisk.toFixed(1)}%`,
-          description: '95% confidence, 1-day',
-          tooltip: 'Maximum expected loss in one day with 95% confidence. For example, -4.2% means there\'s only a 5% chance of losing more than 4.2% of your portfolio value in a single day under normal market conditions.',
-          valueInterpretation: varInterp.text,
-          interpretationColor: varInterp.color,
-        },
-        {
-          label: 'Max Drawdown',
-          value: `${apiRiskMetrics.maxDrawdown.toFixed(1)}%`,
-          description: 'Peak to trough',
-          tooltip: 'Largest potential decline from a portfolio peak to subsequent trough. Represents the worst-case historical loss you could experience. Lower (closer to 0%) indicates better downside protection.',
-          valueInterpretation: ddInterp.text,
-          interpretationColor: ddInterp.color,
-        },
-        {
-          label: 'Information Ratio',
-          value: apiRiskMetrics.informationRatio?.toFixed(2) ?? 'N/A',
-          description: 'vs Benchmark',
-          tooltip: 'Measures portfolio\'s excess return over a benchmark (S&P 500) relative to tracking error. Higher values indicate consistent outperformance. Above 0.5 is good, above 1.0 is excellent active management.',
-          valueInterpretation: infoInterp.text,
-          interpretationColor: infoInterp.color,
-        },
-      ]
-    : []
-
-  const fearGreedValue = marketSentiment?.fearGreedValue ?? 50
-  const fearGreedLabel = marketSentiment?.fearGreedLabel ?? 'Neutral'
-  const vixValue = marketSentiment?.vixValue ?? 14.2
-  const vixStatus = marketSentiment?.vixStatus ?? 'Low volatility'
-  const putCallRatio = marketSentiment?.putCallRatio ?? 0.78
-  const putCallStatus = marketSentiment?.putCallStatus ?? 'Bullish'
-  const marketBreadth = marketSentiment?.marketBreadth ?? 62.5
-  const marketBreadthStatus = marketSentiment?.marketBreadthStatus ?? 'Above 200-day MA'
-  const sentimentAlerts = marketSentiment?.alerts ?? []
-
-  const getVixStatusColor = (status: string) => {
-    switch (status) {
-      case 'Low volatility':
-        return 'text-green-600'
-      case 'Moderate volatility':
-        return 'text-yellow-600'
-      case 'High volatility':
-        return 'text-orange-600'
-      case 'Extreme volatility':
-        return 'text-red-600'
-      default:
-        return 'text-slate-600'
-    }
-  }
-
-  const getPutCallStatusColor = (status: string) => {
-    switch (status) {
-      case 'Bullish':
-        return 'text-green-600'
-      case 'Neutral':
-        return 'text-yellow-600'
-      case 'Bearish':
-        return 'text-red-600'
-      default:
-        return 'text-slate-600'
-    }
-  }
-
-  const getMarketBreadthStatusColor = (status: string) => {
-    switch (status) {
-      case 'Above 200-day MA':
-        return 'text-green-600'
-      case 'Near 200-day MA':
-        return 'text-yellow-600'
-      case 'Below 200-day MA':
-        return 'text-red-600'
-      default:
-        return 'text-slate-600'
-    }
-  }
-
-  const getAlertStyles = (severity: AlertSeverityType) => {
-    switch (severity) {
-      case 'info':
-        return {
-          bg: 'bg-blue-50',
-          border: 'border-blue-200',
-          icon: 'text-blue-600',
-          text: 'text-blue-800',
-        }
-      case 'warning':
-        return {
-          bg: 'bg-yellow-50',
-          border: 'border-yellow-200',
-          icon: 'text-yellow-600',
-          text: 'text-yellow-800',
-        }
-      case 'error':
-        return {
-          bg: 'bg-red-50',
-          border: 'border-red-200',
-          icon: 'text-red-600',
-          text: 'text-red-800',
-        }
-      default:
-        return {
-          bg: 'bg-slate-50',
-          border: 'border-slate-200',
-          icon: 'text-slate-600',
-          text: 'text-slate-800',
-        }
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">Risk Analytics</h2>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getRiskStatusStyle(riskStatus)}`}>
-          {riskStatus}
-        </span>
-      </div>
-
-      {riskAssessment && (
-        <div className={`rounded-md border p-4 ${getRiskAssessmentStyle(riskStatus)}`}>
-          <div className="flex items-start gap-3">
-            <svg
-              className={`h-5 w-5 flex-shrink-0 ${getRiskAssessmentIconColor(riskStatus)}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              {riskStatus === 'Good' ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              ) : riskStatus === 'Needs Attention' ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              )}
-            </svg>
-            <div>
-              <p className="text-sm font-medium text-slate-800">AI Risk Assessment</p>
-              <p className="mt-1 text-sm text-slate-600">{riskAssessment}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div>
-        <div className="flex items-center gap-2 mb-4">
-          <h3 className="text-sm font-semibold text-slate-900">Key Metrics</h3>
-          <span className="text-xs text-slate-400">(hover for details)</span>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          {riskMetrics.map((metric) => (
-            <RiskMetricCard key={metric.label} metric={metric} />
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-900">Market Sentiment</h3>
-          <button
-            onClick={onRefreshMarketSentiment}
-            disabled={marketSentimentRefreshing || marketSentimentLoading}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-            title="Refresh to get latest VIX data"
-          >
-            <svg
-              className={`h-3.5 w-3.5 ${marketSentimentRefreshing ? 'animate-spin' : ''}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-            {marketSentimentRefreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-        {marketSentimentLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="text-sm text-slate-500">Loading market sentiment...</div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-700">Fear & Greed Index</span>
-                <span className="text-sm font-semibold text-slate-900">{fearGreedValue}</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                <div
-                  className={`h-full transition-all ${
-                    fearGreedValue <= 25
-                      ? 'bg-red-500'
-                      : fearGreedValue <= 45
-                        ? 'bg-orange-500'
-                        : fearGreedValue <= 55
-                          ? 'bg-yellow-500'
-                          : fearGreedValue <= 75
-                            ? 'bg-orange-500'
-                            : 'bg-red-500'
-                  }`}
-                  style={{ width: `${fearGreedValue}%` }}
-                ></div>
-              </div>
-              <div className="mt-1 text-xs text-slate-600">{fearGreedLabel}</div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="flex flex-col gap-1">
-                <div className="text-xs font-medium text-slate-600">VIX</div>
-                <div className="text-lg font-bold text-slate-900">{vixValue.toFixed(1)}</div>
-                <div className={`text-xs ${getVixStatusColor(vixStatus)}`}>{vixStatus}</div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <div className="text-xs font-medium text-slate-600">Put/Call Ratio</div>
-                <div className="text-lg font-bold text-slate-900">{putCallRatio.toFixed(2)}</div>
-                <div className={`text-xs ${getPutCallStatusColor(putCallStatus)}`}>{putCallStatus}</div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <div className="text-xs font-medium text-slate-600">Market Breadth</div>
-                <div className="text-lg font-bold text-slate-900">{marketBreadth.toFixed(1)}%</div>
-                <div className={`text-xs ${getMarketBreadthStatusColor(marketBreadthStatus)}`}>{marketBreadthStatus}</div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {sentimentAlerts.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {sentimentAlerts.map((alert, index) => {
-            const styles = getAlertStyles(alert.severity)
-            const alertKey = `${index}-${alert.severity}-${alert.message.slice(0, 20).replace(/\s+/g, '-')}`
-            return (
-              <div key={alertKey} className={`rounded-md border ${styles.border} ${styles.bg} p-4`}>
-                <div className="flex items-start gap-3">
-                  <svg
-                    className={`h-5 w-5 flex-shrink-0 ${styles.icon}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    {alert.severity === 'info' ? (
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    ) : (
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                      />
-                    )}
-                  </svg>
-                  <p className={`text-sm font-medium ${styles.text}`}>
-                    {alert.message}
-                  </p>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const PortfolioRebalancing = ({
-  rebalancing,
-  rebalancingMetadata,
-  rebalancingLoading,
-  onRefreshRebalancing,
-  taxLossHarvesting,
-}: {
-  rebalancing: Array<{
-    symbol: string
-    name: string
-    currentAllocation: number
-    targetAllocation: number
-    action: 'Buy' | 'Sell'
-    amount: number
-    reason: string
-    risk: 'Low' | 'Medium' | 'High'
-  }>
-  rebalancingMetadata: {
-    iterationCount: number
-    evaluationScore: number
-    improvementsMade: string[]
-    evaluationPassed: boolean
-  } | null
-  rebalancingLoading: boolean
-  onRefreshRebalancing: () => Promise<void>
-  taxLossHarvesting: Array<{
-    symbol: string
-    name: string
-    unrealizedLoss: number
-    taxSavings: number
-    replacementOptions: Array<{ symbol: string; name: string; reason: string }>
-    washSaleRisk: 'Low' | 'Medium' | 'High'
-    currentValue: number
-    lossPercentage: number
-  }>
-}) => {
-  const [isRefreshing, setIsRefreshing] = useState(false)
-
-  const handleRefreshRebalancing = async () => {
-    setIsRefreshing(true)
-    try {
-      await onRefreshRebalancing()
-    } finally {
-      setIsRefreshing(false)
-    }
-  }
-  const recommendations = rebalancing
-
-  const totalSuggestedTrades = recommendations.reduce(
-    (sum, rec) => sum + Math.abs(rec.amount),
-    0,
-  )
-  const actionsRequired = recommendations.length
-
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'High':
-        return 'bg-red-100 text-red-700'
-      case 'Medium':
-        return 'bg-yellow-100 text-yellow-700'
-      case 'Low':
-        return 'bg-green-100 text-green-700'
-      default:
-        return 'bg-slate-100 text-slate-700'
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <div>
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Portfolio Rebalancing</h2>
-            <p className="text-sm text-slate-600">
-              AI-powered recommendations to optimize your portfolio allocation
-            </p>
-          </div>
-          {rebalancingMetadata && (
-            <div className="flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-1.5">
-              <div className="text-right">
-                <div className="text-xs font-medium text-slate-600">AI Quality Score</div>
-                <div className={`text-sm font-bold ${
-                  rebalancingMetadata.evaluationPassed 
-                    ? 'text-green-600' 
-                    : rebalancingMetadata.evaluationScore >= 60 
-                    ? 'text-yellow-600' 
-                    : 'text-red-600'
-                }`}>
-                  {rebalancingMetadata.evaluationScore}%
-                </div>
-              </div>
-              <div className="h-8 w-px bg-slate-300"></div>
-              <div className="text-right">
-                <div className="text-xs font-medium text-slate-600">Iterations</div>
-                <div className="text-sm font-semibold text-slate-900">
-                  {rebalancingMetadata.iterationCount}
-                </div>
-              </div>
-              {rebalancingMetadata.evaluationPassed && (
-                <div className="ml-1 rounded-full bg-green-500 p-1">
-                  <svg className="h-2 w-2 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs font-medium text-blue-600">Total Suggested Trades</div>
-            <div className="text-2xl font-bold text-blue-900">{formatCurrency(totalSuggestedTrades)}</div>
-          </div>
-          <div>
-            <div className="text-xs font-medium text-blue-600">Actions Required</div>
-            <div className="text-2xl font-bold text-blue-900">{actionsRequired}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        {recommendations.map((rec) => (
-          <div
-            key={rec.symbol}
-            className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-900">{rec.symbol}</span>
-                  <span className="text-xs text-slate-600">{rec.name}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getRiskColor(rec.risk)}`}
-                  >
-                    {rec.risk}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="flex-1">
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="text-slate-600">Current allocation</span>
-                  <span className="font-semibold text-slate-900">
-                    {rec.currentAllocation.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className="h-full bg-teal-500 transition-all"
-                    style={{ width: `${Math.min(rec.currentAllocation, 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div className="flex-1">
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="text-slate-600">Target allocation</span>
-                  <span className="font-semibold text-slate-900">
-                    {rec.targetAllocation.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className="h-full bg-teal-500 transition-all"
-                    style={{ width: `${Math.min(rec.targetAllocation, 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-medium text-slate-600">Action</div>
-                <div
-                  className={`text-sm font-semibold ${
-                    rec.action === 'Sell' ? 'text-red-600' : 'text-green-600'
-                  }`}
-                >
-                  {rec.action} {formatCurrency(rec.amount)}
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-medium text-slate-600">Reason</div>
-              <p className="text-xs leading-relaxed text-slate-700">{rec.reason}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <h3 className="mb-4 text-sm font-semibold text-slate-900">Tax Loss Harvesting Opportunities</h3>
-        {taxLossHarvesting.length === 0 ? (
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-            <p className="text-sm text-slate-600">
-              No tax loss harvesting opportunities found. All holdings are currently at a gain or break-even.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {taxLossHarvesting.map((opportunity) => {
-              const getWashSaleRiskColor = (risk: string) => {
-                switch (risk) {
-                  case 'High':
-                    return 'text-red-600'
-                  case 'Medium':
-                    return 'text-yellow-600'
-                  case 'Low':
-                    return 'text-green-600'
-                  default:
-                    return 'text-slate-600'
-                }
-              }
-
-              const replacementText =
-                opportunity.replacementOptions.length > 0
-                  ? opportunity.replacementOptions
-                      .map(
-                        (opt) =>
-                          `${opt.symbol} (${opt.name})${opt.reason ? ` - ${opt.reason}` : ''}`,
-                      )
-                      .join(' or ')
-                  : 'No replacement options available'
-
-              return (
-                <div
-                  key={opportunity.symbol}
-                  className="rounded-lg bg-green-50 border border-green-200 p-4"
-                >
-                  <div className="mb-3">
-                    <div className="text-sm font-bold text-slate-900">{opportunity.symbol}</div>
-                    <div className="text-xs text-slate-600">{opportunity.name}</div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-xs font-medium text-slate-600 mb-1">Unrealized Loss</div>
-                      <div className="text-sm font-semibold text-red-600">
-                        {formatCurrency(opportunity.unrealizedLoss)}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {opportunity.lossPercentage.toFixed(1)}% loss
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-medium text-slate-600 mb-1">Tax Savings</div>
-                      <div className="text-sm font-semibold text-green-600">
-                        {formatCurrency(opportunity.taxSavings)}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Current value: {formatCurrencyShort(opportunity.currentValue)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-xs font-medium text-slate-600 mb-1">Replacement</div>
-                      <p className="text-xs text-slate-700">{replacementText}</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-medium text-slate-600 mb-1">Wash Sale Risk</div>
-                      <div
-                        className={`text-xs font-semibold ${getWashSaleRiskColor(opportunity.washSaleRisk)}`}
-                      >
-                        {opportunity.washSaleRisk}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={handleRefreshRebalancing}
-        disabled={isRefreshing || rebalancingLoading}
-        className="w-full rounded-lg bg-black px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-      >
-        {(isRefreshing || rebalancingLoading) ? (
-          <>
-            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            Regenerating Recommendations...
-          </>
-        ) : (
-          'Regenerate Rebalancing Plan'
-        )}
-      </button>
+      <p className="border-t border-line pt-3 text-xs text-muted">
+        AI-generated for education only. Not financial advice.
+      </p>
     </div>
   )
 }

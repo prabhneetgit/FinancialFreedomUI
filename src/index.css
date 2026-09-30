@@ -1,2 +1,50 @@
 @import 'tailwindcss';
 
+/* Morning Briefing design tokens (see the Financial Freedom Redesign canvas, option C). */
+@theme {
+  --font-sans: 'Libre Franklin', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+
+  --color-paper: #ffffff;
+  --color-sand: #f6f6f3;
+  --color-chip: #f0f0ec;
+  --color-line: #e4e4e4;
+  --color-hairline: #eeeeee;
+  --color-track: #e8e8e8;
+  --color-ink: #111111;
+  --color-ink-soft: #333333;
+  --color-muted: #5a5a5a;
+  --color-accent: #2340c8;
+  --color-accent-dark: #16298a;
+  --color-gain: #1e6b3a;
+  --color-loss: #b8321f;
+  --color-amber: #c98a1b;
+  --color-amber-ink: #8a5a12;
+}
+
+body {
+  @apply bg-paper font-sans text-ink antialiased;
+  font-variant-numeric: lining-nums;
+}
+
+.smallcaps {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dropcap::first-letter {
+  float: left;
+  padding: 6px 8px 0 0;
+  font-family: var(--font-serif);
+  font-size: 64px;
+  font-weight: 600;
+  line-height: 0.85;
+}
