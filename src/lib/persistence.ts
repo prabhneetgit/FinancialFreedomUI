@@ -36,7 +36,7 @@ async function getDB(): Promise<IDBPDatabase<FinancialFreedomDB> | null> {
   if (!dbPromise) {
     const timeoutPromise = new Promise<null>((resolve) => {
       setTimeout(() => {
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.warn('IndexedDB open timeout')
         }
         resolve(null)
@@ -54,7 +54,7 @@ async function getDB(): Promise<IDBPDatabase<FinancialFreedomDB> | null> {
       }),
       timeoutPromise,
     ]).catch((error) => {
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.error('Failed to open IndexedDB:', error)
       }
       return null
@@ -64,7 +64,7 @@ async function getDB(): Promise<IDBPDatabase<FinancialFreedomDB> | null> {
   try {
     return await dbPromise
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.error('IndexedDB operation failed:', error)
     }
     dbPromise = null
@@ -98,7 +98,7 @@ export async function loadFromIndexedDB<T>(key: string): Promise<T | null> {
     const operationPromise = db.get(STORE_NAME, key)
     const timeoutPromise = new Promise<null>((resolve) => {
       setTimeout(() => {
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.warn('IndexedDB load timeout for key:', key)
         }
         resolve(null)
@@ -111,7 +111,7 @@ export async function loadFromIndexedDB<T>(key: string): Promise<T | null> {
     }
     return null
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.error('Failed to load from IndexedDB:', error)
     }
     return null

@@ -1,4 +1,4 @@
-import { useEffect, ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { queryClient } from '../lib/react-query'
 import { queryKeys } from '../lib/react-query'
 import { loadFromIndexedDB } from '../lib/persistence'
@@ -53,11 +53,11 @@ export function PersistenceProvider({ children }: PersistenceProviderProps) {
         )
 
         const failed = results.filter((result) => result.status === 'rejected')
-        if (failed.length > 0 && process.env.NODE_ENV === 'development') {
+        if (failed.length > 0 && import.meta.env.DEV) {
           console.warn(`Failed to load ${failed.length} cached items from IndexedDB`)
         }
       } catch (error) {
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.error('Failed to load cached data:', error)
         }
       }

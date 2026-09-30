@@ -81,7 +81,7 @@ interface UseAnalyticsResult {
 export function useAnalytics(holdingsHash?: string): UseAnalyticsResult {
   const lastHoldingsHashRef = useRef<string | undefined>(holdingsHash)
   const lastRefreshDateRef = useRef<string>(getCurrentTradingDate())
-  const dailyRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const dailyRefreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [marketSentimentRefreshing, setMarketSentimentRefreshing] = useState(false)
   const performanceQuery = useQuery({
     queryKey: queryKeys.analytics.performance(),

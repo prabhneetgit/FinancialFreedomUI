@@ -47,7 +47,7 @@ export function usePerformanceHistory(months: number = 6, holdingsHash?: string)
     performanceHistory: query.data || null,
     loading: query.isLoading,
     error: query.error as Error | null,
-    refetch: async (monthsToFetch?: number) => {
+    refetch: async () => {
       await query.refetch()
     },
   }
