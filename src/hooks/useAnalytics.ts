@@ -16,30 +16,7 @@ import type {
 } from '../types/api'
 import { queryKeys, queryClient } from '../lib/react-query'
 import { saveToIndexedDB, loadFromIndexedDB, deleteFromIndexedDB } from '../lib/persistence'
-
-function getEasternTime(): Date {
-  const now = new Date()
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-  const parts = formatter.formatToParts(now)
-  const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0'
-  
-  return new Date(
-    parseInt(getPart('year')),
-    parseInt(getPart('month')) - 1,
-    parseInt(getPart('day')),
-    parseInt(getPart('hour')),
-    parseInt(getPart('minute')),
-    parseInt(getPart('second'))
-  )
-}
+import { getEasternTime, getCurrentTradingDate } from '../lib/tradingDate'
 
 function isMarketOpen(): boolean {
   const et = getEasternTime()
@@ -49,11 +26,6 @@ function isMarketOpen(): boolean {
   
   if (isWeekend) return false
   return hour >= 9.5 && hour < 16
-}
-
-function getCurrentTradingDate(): string {
-  const et = getEasternTime()
-  return et.toISOString().split('T')[0]
 }
 
 interface UseAnalyticsResult {

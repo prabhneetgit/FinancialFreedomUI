@@ -12,6 +12,7 @@ import { PortfolioPerformanceChart } from './Analytics'
 import { portfolioAPI, stockAPI, type CSVUploadResponse } from '../services/api'
 import { queryKeys } from '../lib/react-query'
 import { deleteFromIndexedDB } from '../lib/persistence'
+import { getEasternTime } from '../lib/tradingDate'
 import type {
   HoldingCategory,
   MarketInsight,
@@ -221,31 +222,6 @@ const NYSE_HOURS = {
   MORNING: { start: 9.5, end: 12 },
   MIDDAY: { start: 12, end: 14 },
   CLOSING: { start: 14, end: 16 },
-}
-
-const getEasternTime = (): Date => {
-  const now = new Date()
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = formatter.formatToParts(now)
-  const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0'
-  
-  return new Date(
-    parseInt(getPart('year')),
-    parseInt(getPart('month')) - 1,
-    parseInt(getPart('day')),
-    parseInt(getPart('hour')),
-    parseInt(getPart('minute')),
-    parseInt(getPart('second'))
-  )
 }
 
 const getMarketStatus = (): { status: MarketStatus; currentPeriod: MarketPeriod | null; isWeekend: boolean } => {
