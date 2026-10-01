@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { usePortfolio } from '../hooks/usePortfolio'
 import { useAnalytics } from '../hooks/useAnalytics'
@@ -7,34 +7,74 @@ import { useMarketInsights } from '../hooks/useMarketInsights'
 import { useDailyMarketSummary } from '../hooks/useDailyMarketSummary'
 import { useDailyMarketSummaryExists } from '../hooks/useDailyMarketSummaryExists'
 import { usePreMarketInsights } from '../hooks/usePreMarketInsights'
+import { usePerformanceHistory } from '../hooks/usePerformanceHistory'
+import { PortfolioPerformanceChart } from './Analytics'
 import { portfolioAPI, stockAPI, type CSVUploadResponse } from '../services/api'
 import { queryKeys } from '../lib/react-query'
 import { deleteFromIndexedDB } from '../lib/persistence'
+import { getEasternTime } from '../lib/tradingDate'
 import type {
   HoldingCategory,
   MarketInsight,
   OptionStrategy,
   PortfolioHolding,
+  RebalancingRecommendation,
   StockDetail,
   StockInsight,
   StockPeriodType,
+  TaxLossHarvestingOpportunity,
   TrendPeriodType as TrendPeriod,
 } from '../types/api'
+
+const MINUS = '−'
 
 const formatCad = (value: number) => {
   const formatted = new Intl.NumberFormat('en-CA', {
     maximumFractionDigits: 0,
   }).format(value)
-  return `$ ${formatted}`
+  return `$${formatted}`
 }
 
 const formatPercent = (value: number, includeSign: boolean = false) => {
   const formatted = `${Math.abs(value).toFixed(1)}%`
   if (includeSign) {
-    return value >= 0 ? `+${formatted}` : `-${formatted}`
+    return value >= 0 ? `+${formatted}` : `${MINUS}${formatted}`
   }
-  return value >= 0 ? formatted : `-${formatted}`
+  return value >= 0 ? formatted : `${MINUS}${formatted}`
 }
+
+const signedCad = (value: number) => `${value >= 0 ? '+' : MINUS}${formatCad(Math.abs(value))}`
+
+const Icon = ({ d, className = 'h-4 w-4' }: { d: string; className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.75}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d={d} />
+  </svg>
+)
+
+const ICONS = {
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+  upload: 'M12 15V4M7.5 8.5L12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-3.5-3.5',
+  sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z',
+  chevron: 'M9 6l6 6-6 6',
+}
+
+const RANGES = [
+  { label: '1M', months: 1, name: 'One-month' },
+  { label: '3M', months: 3, name: 'Three-month' },
+  { label: '6M', months: 6, name: 'Half-year' },
+  { label: '1Y', months: 12, name: 'One-year' },
+  { label: '2Y', months: 24, name: 'Two-year' },
+]
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-CA', {
@@ -47,30 +87,6 @@ const formatCurrency = (value: number) => {
 
 const tabs: HoldingCategory[] = ['Stocks', 'ETFs', 'Crypto', 'Sector']
 
-const DetailPill = ({
-  label,
-  active,
-  onClick,
-}: {
-  label: string
-  active?: boolean
-  onClick?: () => void
-}) => {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-sm font-semibold transition-colors ${
-        active
-          ? 'text-slate-900 border-b-2 border-slate-900 pb-1'
-          : 'text-slate-600 hover:text-slate-900'
-      }`}
-    >
-      {label}
-    </button>
-  )
-}
-
 const InsightTabs = ({
   insights,
 }: {
@@ -81,24 +97,24 @@ const InsightTabs = ({
     insights.find((insight) => insight.period === activePeriod) ?? insights[0]
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         {insights.map((insight) => (
           <button
             key={insight.period}
             type="button"
             onClick={() => setActivePeriod(insight.period)}
-            className={`rounded-md px-3 py-2 text-xs font-semibold tracking-tight ${
+            className={`border px-3 py-2 text-xs font-semibold ${
               activePeriod === insight.period
-                ? 'bg-black text-white'
-                : 'bg-slate-100 text-slate-700'
+                ? 'border-ink bg-ink text-white'
+                : 'border-line bg-white text-ink-soft hover:border-ink'
             }`}
           >
             {insight.period}
           </button>
         ))}
       </div>
-      <div className="max-h-64 overflow-y-auto rounded-lg bg-slate-50 p-3">
+      <div className="max-h-64 overflow-y-auto border-y border-line py-3">
         <FormattedInsightContent text={activeInsight?.text || ''} />
       </div>
       <button
@@ -114,7 +130,7 @@ const InsightTabs = ({
 const FormattedInsightContent = ({ text }: { text: string }) => {
   const parseContent = (content: string) => {
     const lines = content.split('\n')
-    const elements: JSX.Element[] = []
+    const elements: React.ReactElement[] = []
     let currentList: string[] = []
     let listKey = 0
 
@@ -153,7 +169,7 @@ const FormattedInsightContent = ({ text }: { text: string }) => {
         flushList()
         const headerText = trimmedLine.replace(/^###\s+/, '').replace(/\*\*/g, '')
         elements.push(
-          <h3 key={`h3-${index}`} className="mt-3 first:mt-0 text-base font-bold text-slate-900">
+          <h3 key={`h3-${index}`} className="mt-3 first:mt-0 text-base font-bold text-ink">
             {headerText}
           </h3>
         )
@@ -206,31 +222,6 @@ const NYSE_HOURS = {
   MORNING: { start: 9.5, end: 12 },
   MIDDAY: { start: 12, end: 14 },
   CLOSING: { start: 14, end: 16 },
-}
-
-const getEasternTime = (): Date => {
-  const now = new Date()
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = formatter.formatToParts(now)
-  const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0'
-  
-  return new Date(
-    parseInt(getPart('year')),
-    parseInt(getPart('month')) - 1,
-    parseInt(getPart('day')),
-    parseInt(getPart('hour')),
-    parseInt(getPart('minute')),
-    parseInt(getPart('second'))
-  )
 }
 
 const getMarketStatus = (): { status: MarketStatus; currentPeriod: MarketPeriod | null; isWeekend: boolean } => {
@@ -319,10 +310,6 @@ const MarketInsightTabs = ({
     }
   }
 
-  const handlePreMarketButtonClick = () => {
-    fetchPreMarketInsights(true)
-  }
-  
   const hasInsightData = (period: MarketPeriod): boolean => {
     if (period === 'PRE_MARKET') {
       return !!preMarketInsight
@@ -407,15 +394,16 @@ const MarketInsightTabs = ({
       return
     }
     
-    if (marketInfo.currentPeriod) {
+    const currentPeriod = marketInfo.currentPeriod
+    if (currentPeriod) {
       setActivePeriod((current) => {
-        if (current !== marketInfo.currentPeriod) {
-          const hasData = marketInfo.currentPeriod === 'PRE_MARKET' 
-            ? !!preMarketInsight 
-            : insights.some((insight) => insight.period === marketInfo.currentPeriod && insight.text)
-          
+        if (current !== currentPeriod) {
+          const hasData = currentPeriod === 'PRE_MARKET'
+            ? !!preMarketInsight
+            : insights.some((insight) => insight.period === currentPeriod && insight.text)
+
           if (hasData) {
-            return marketInfo.currentPeriod
+            return currentPeriod
           }
         }
         return current
@@ -473,29 +461,38 @@ const MarketInsightTabs = ({
     
     switch (marketInfo.status) {
       case 'pre-market':
-        return { label: 'Pre-Market', color: 'bg-amber-100 text-amber-800', time: timeStr }
+        return { label: 'Pre-market', color: 'text-accent', time: timeStr }
       case 'morning':
-        return { label: 'Market Open', color: 'bg-emerald-100 text-emerald-800', time: timeStr }
+        return { label: 'Market open', color: 'text-gain', time: timeStr }
       case 'midday':
-        return { label: 'Market Open', color: 'bg-emerald-100 text-emerald-800', time: timeStr }
+        return { label: 'Market open', color: 'text-gain', time: timeStr }
       case 'closing':
-        return { label: 'Market Open', color: 'bg-emerald-100 text-emerald-800', time: timeStr }
+        return { label: 'Market open', color: 'text-gain', time: timeStr }
       case 'after-hours':
-        return { label: 'After Hours', color: 'bg-slate-100 text-slate-800', time: timeStr }
+        return { label: 'After hours', color: 'text-muted', time: timeStr }
       case 'closed':
-        return { label: 'Market Closed', color: 'bg-slate-100 text-slate-600', time: 'Weekend' }
+        return { label: 'Market closed', color: 'text-muted', time: 'Weekend' }
     }
   }
 
   const statusDisplay = getMarketStatusDisplay()
 
+  const periodButtonClass = (variant: 'pre-active' | 'active' | 'pre' | 'enabled' | 'disabled') =>
+    `flex h-9 items-center gap-1.5 border px-3 text-xs font-semibold capitalize transition-colors ${
+      {
+        'pre-active': 'border-ink bg-ink text-white',
+        active: 'border-ink bg-ink text-white',
+        pre: 'border-accent text-accent hover:bg-[#eef1fc]',
+        enabled: 'border-line bg-white text-ink-soft hover:border-ink',
+        disabled: 'cursor-not-allowed border-hairline bg-white text-[#9a9a9a]',
+      }[variant]
+    }`
+
   if (loading) {
     return (
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-          <span className="text-sm text-slate-600">Loading market insights...</span>
-        </div>
+      <div className="flex items-center gap-2 py-2">
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-line border-t-accent" />
+        <span className="text-sm text-muted">Loading market insights...</span>
       </div>
     )
   }
@@ -512,15 +509,15 @@ const MarketInsightTabs = ({
   // Don't return early if we're in pre-market hours - allow PRE_MARKET tab to be shown
   if (!insights.length && marketInfo.status !== 'pre-market') {
     return (
-      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {periods.map((period) => (
               <button
                 key={period}
                 type="button"
                 disabled
-                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-tight bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                className={periodButtonClass('disabled')}
               >
                 {getPeriodIcon(period, true)}
                 {period.toLowerCase()}
@@ -530,23 +527,23 @@ const MarketInsightTabs = ({
               </button>
             ))}
           </div>
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${statusDisplay.color}`}>
+          <div className={`flex items-center gap-1.5 text-xs font-semibold ${statusDisplay.color}`}>
             <span className="relative flex h-2 w-2">
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-400" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#8a8a8a]" />
             </span>
-            {statusDisplay.label} • {statusDisplay.time}
+            {statusDisplay.label} · {statusDisplay.time}
           </div>
         </div>
-        <div className="flex flex-col items-center justify-center py-8 text-center rounded-lg bg-white border border-slate-100">
-          <svg className="h-12 w-12 text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex flex-col items-center justify-center border-y border-line py-8 text-center">
+          <svg className="h-10 w-10 text-[#bdbdbd] mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <p className="text-sm font-medium text-slate-600">
+          <p className="text-sm font-medium text-ink-soft">
             {marketInfo.isWeekend
               ? "Market is closed for the weekend"
               : "No market insights available yet"}
           </p>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             {marketInfo.isWeekend
               ? "Check back Monday for today's insights"
               : "Insights will be available during market hours"}
@@ -555,11 +552,11 @@ const MarketInsightTabs = ({
       </div>
     )
   }
-  
+
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           {periods.map((period) => {
             const isPreMarketPeriod = period === 'PRE_MARKET'
@@ -585,17 +582,17 @@ const MarketInsightTabs = ({
                   }}
                   disabled={!isEnabled && !isPreMarketPeriod}
                   title={isEnabled || isPreMarketPeriod ? getPeriodInfo(period) : `${period} insights not yet available for today`}
-                  className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-tight transition-all ${
+                  className={periodButtonClass(
                     isPreMarketPeriod && isActive
-                      ? 'bg-amber-600 text-white shadow-md'
+                      ? 'pre-active'
                       : isActive
-                        ? 'bg-slate-900 text-white shadow-md'
+                        ? 'active'
                         : isPreMarketPeriod
-                          ? 'bg-amber-500 text-white hover:bg-amber-600 border border-amber-400'
+                          ? 'pre'
                           : isEnabled
-                            ? 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:border-slate-300'
-                            : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                  }`}
+                            ? 'enabled'
+                            : 'disabled',
+                  )}
                 >
                   {getPeriodIcon(period, !isEnabled && !isPreMarketPeriod)}
                   {period === 'PRE_MARKET' ? 'pre-market' : period.toLowerCase()}
@@ -614,51 +611,52 @@ const MarketInsightTabs = ({
                   )}
                 </button>
                 {isCurrent && (isEnabled || isPreMarketPeriod) && (
-                  <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-white" />
+                  <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-accent border-2 border-white" />
                 )}
               </div>
             )
           })}
         </div>
-        <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${statusDisplay.color}`}>
+        <div className={`flex items-center gap-1.5 text-xs font-semibold ${statusDisplay.color}`}>
           <span className="relative flex h-2 w-2">
             {(marketInfo.status === 'morning' || marketInfo.status === 'midday' || marketInfo.status === 'closing') && (
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gain opacity-50" />
             )}
             <span className={`relative inline-flex rounded-full h-2 w-2 ${
               marketInfo.status === 'morning' || marketInfo.status === 'midday' || marketInfo.status === 'closing'
-                ? 'bg-emerald-500'
+                ? 'bg-gain'
                 : marketInfo.status === 'pre-market'
-                  ? 'bg-amber-500'
-                  : 'bg-slate-400'
+                  ? 'bg-accent'
+                  : 'bg-[#8a8a8a]'
             }`} />
           </span>
-          {statusDisplay.label} • {statusDisplay.time}
+          {statusDisplay.label} · {statusDisplay.time}
         </div>
       </div>
 
-      <div className="flex items-center gap-4 text-xs text-slate-500 border-b border-slate-100 pb-2">
-        <span className="font-medium">NYSE Hours (ET):</span>
+      <div className="flex flex-col gap-1 text-xs text-muted">
+        <span className="font-semibold uppercase tracking-[0.06em] text-[11px]">NYSE hours (ET)</span>
         {periods.map((period) => {
           const isEnabled = isPeriodEnabled(period)
           const isCurrent = marketInfo.currentPeriod === period || (period === 'PRE_MARKET' && marketInfo.status === 'pre-market')
           return (
-            <span 
-              key={period} 
-              className={`${isCurrent ? 'text-emerald-600 font-semibold' : isEnabled || period === 'PRE_MARKET' ? 'text-slate-600' : 'text-slate-400'}`}
+            <span
+              key={period}
+              className={`flex justify-between ${isCurrent ? 'text-accent font-semibold' : isEnabled || period === 'PRE_MARKET' ? 'text-ink-soft' : 'text-[#8a8a8a]'}`}
             >
-              {period === 'PRE_MARKET' ? 'Pre-Market' : period.charAt(0) + period.slice(1).toLowerCase()}: {getPeriodInfo(period)}
+              <span>{period === 'PRE_MARKET' ? 'Pre-market' : period.charAt(0) + period.slice(1).toLowerCase()}</span>
+              <span className="tabular-nums">{getPeriodInfo(period)}</span>
             </span>
           )
         })}
       </div>
-      
-      <div className="max-h-80 overflow-y-auto rounded-lg bg-white p-4 border border-slate-100">
+
+      <div className="max-h-80 overflow-y-auto border-y border-line py-4">
         {activePeriod === 'PRE_MARKET' ? (
           <>
             {preMarketLoading ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
-                <svg className="h-12 w-12 text-amber-500 mb-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <svg className="h-10 w-10 text-accent mb-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                   <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="2" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
@@ -685,44 +683,39 @@ const MarketInsightTabs = ({
                 <button
                   type="button"
                   onClick={() => fetchPreMarketInsights(true)}
-                  className="mt-3 text-xs text-amber-600 hover:text-amber-700 font-medium underline"
+                  className="mt-3 text-xs text-accent hover:text-accent-dark font-semibold underline"
                 >
                   Try again
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <svg className="h-12 w-12 text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <p className="text-sm font-medium text-slate-600">
-                  Pre-market insights not yet available
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <p className="text-sm font-medium text-ink-soft">
+                  Your pre-market brief isn’t ready yet
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Click the Pre-Market tab to generate insights
+                <p className="text-xs text-muted mt-1">
+                  Built from futures, overnight news and global markets
                 </p>
                 <button
                   type="button"
                   onClick={() => fetchPreMarketInsights(true)}
-                  className="mt-4 flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+                  className="mt-4 flex h-11 items-center gap-2 border border-ink bg-white px-4 text-sm font-semibold text-ink transition-colors hover:bg-ink hover:text-white"
                 >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Get Pre-Market Insights
+                  <Icon d={ICONS.sparkle} />
+                  Generate pre-market brief
                 </button>
               </div>
             )}
           </>
         ) : !isPeriodEnabled(activePeriod) ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <svg className="h-12 w-12 text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-10 w-10 text-[#bdbdbd] mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-sm font-medium text-slate-600">
+            <p className="text-sm font-medium text-ink-soft">
               {activePeriod.charAt(0) + activePeriod.slice(1).toLowerCase()} insights not yet available for today
             </p>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-muted mt-1">
               Check back during {getPeriodInfo(activePeriod)}
             </p>
           </div>
@@ -741,10 +734,10 @@ const MarketInsightTabs = ({
               setShowSummaryModal(true)
             }
           }}
-          className={`self-start text-sm font-semibold underline underline-offset-4 transition-colors ${
+          className={`self-start text-sm font-semibold transition-colors ${
             isMarketClosed && summaryExists && !summaryExistsLoading
-              ? 'text-slate-700 hover:text-slate-900 decoration-slate-300 hover:decoration-slate-500 cursor-pointer'
-              : 'text-slate-400 decoration-slate-200 cursor-not-allowed'
+              ? 'text-accent hover:text-accent-dark cursor-pointer'
+              : 'text-[#8a8a8a] cursor-not-allowed'
           }`}
           disabled={!isMarketClosed || !summaryExists || summaryExistsLoading}
           title={
@@ -757,15 +750,15 @@ const MarketInsightTabs = ({
               : 'View comprehensive daily market summary'
           }
         >
-          View Full Report →
+          View full report →
         </button>
       </div>
 
       {showSummaryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4" onClick={() => setShowSummaryModal(false)}>
-          <div className="relative max-w-4xl w-full max-h-[90vh] bg-white rounded-xl shadow-xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h2 className="text-xl font-bold text-slate-900">Daily Market Summary</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4" onClick={() => setShowSummaryModal(false)}>
+          <div className="relative max-w-4xl w-full max-h-[90vh] bg-white shadow-xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-line">
+              <h2 className="font-serif text-3xl">Daily market summary</h2>
               <button
                 type="button"
                 onClick={() => setShowSummaryModal(false)}
@@ -836,7 +829,7 @@ const TrendGrid = ({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h3 className="text-base font-semibold text-slate-900">Historical Trend</h3>
+      <h3 className="text-base font-semibold text-ink">Historical Trend</h3>
       <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-6">
         {cells.map((period) => {
           const value = getCellValue(period)
@@ -846,18 +839,18 @@ const TrendGrid = ({
           let buttonClasses = 'rounded-lg border px-3 py-2 text-center text-xs font-semibold transition-colors'
           
           if (isActive) {
-            buttonClasses += ' bg-black border-black text-white'
+            buttonClasses += ' bg-ink border-ink text-white'
           } else if (isToday) {
             buttonClasses += ' bg-slate-700 border-slate-700 text-white'
           } else {
-            buttonClasses += ' bg-slate-100 border-slate-200 text-slate-900'
+            buttonClasses += ' bg-slate-100 border-slate-200 text-ink'
           }
 
           const recommendationColor =
             value === 'Sell'
-              ? 'text-rose-600'
+              ? 'text-loss'
               : value === 'Buy'
-                ? 'text-emerald-700'
+                ? 'text-gain'
                 : isActive
                   ? 'text-white'
                   : 'text-slate-700'
@@ -880,16 +873,16 @@ const TrendGrid = ({
         })}
       </div>
       {selectedAnalysis && (
-        <div className="mt-4 rounded-lg border-l-4 border-black border-r border-t border-b border-slate-200 bg-white px-4 py-4 shadow-md">
+        <div className="mt-4 rounded-lg border-l-4 border-ink border-r border-t border-b border-slate-200 bg-white px-4 py-4 shadow-md">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <p className="text-sm font-semibold text-slate-900">{selectedPeriod} Analysis</p>
+              <p className="text-sm font-semibold text-ink">{selectedPeriod} Analysis</p>
               <p
                 className={`mt-1 text-base font-bold ${
                   selectedAnalysis.recommendation === 'Sell'
-                    ? 'text-rose-600'
+                    ? 'text-loss'
                     : selectedAnalysis.recommendation === 'Buy'
-                      ? 'text-emerald-700'
+                      ? 'text-gain'
                       : 'text-slate-700'
                 }`}
               >
@@ -941,7 +934,7 @@ const TrendGrid = ({
               <div className="mt-2 grid grid-cols-2 gap-3">
                 {Object.entries(selectedAnalysis.keyMetrics).map(([key, value], index) => {
                   const isPositiveValue = typeof value === 'string' && (value.startsWith('+') || value.includes('Positive'))
-                  const valueColor = isPositiveValue ? 'text-emerald-700' : 'text-slate-900'
+                  const valueColor = isPositiveValue ? 'text-gain' : 'text-ink'
                   const isFirstRow = index < 2
                   
                   return (
@@ -991,7 +984,7 @@ const OptionStrategies = ({
   const getSentimentColor = (sentiment: OptionStrategy['sentiment']) => {
     switch (sentiment) {
       case 'Bullish':
-        return 'bg-emerald-100 text-emerald-700'
+        return 'bg-emerald-100 text-gain'
       case 'Bearish':
         return 'bg-rose-100 text-rose-700'
       case 'Neutral':
@@ -1004,11 +997,11 @@ const OptionStrategies = ({
   const getRiskLevelColor = (riskLevel: OptionStrategy['riskLevel']) => {
     switch (riskLevel) {
       case 'Low':
-        return 'bg-emerald-100 text-emerald-700'
+        return 'bg-emerald-100 text-gain'
       case 'Medium':
         return 'bg-amber-100 text-amber-700'
       case 'High':
-        return 'bg-emerald-100 text-emerald-700'
+        return 'bg-emerald-100 text-gain'
       default:
         return 'bg-slate-100 text-slate-700'
     }
@@ -1028,7 +1021,7 @@ const OptionStrategies = ({
   }
 
   const getRiskTypeColor = (riskType: string | undefined) => {
-    if (riskType === 'Defined') return 'bg-emerald-100 text-emerald-700'
+    if (riskType === 'Defined') return 'bg-emerald-100 text-gain'
     if (riskType === 'Undefined') return 'bg-rose-100 text-rose-700'
     return 'bg-slate-100 text-slate-700'
   }
@@ -1038,7 +1031,7 @@ const OptionStrategies = ({
       case 'Directional':
         return 'bg-blue-100 text-blue-700'
       case 'Income':
-        return 'bg-emerald-100 text-emerald-700'
+        return 'bg-emerald-100 text-gain'
       case 'Volatility':
         return 'bg-purple-100 text-purple-700'
       case 'Protective':
@@ -1055,10 +1048,10 @@ const OptionStrategies = ({
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/80 backdrop-blur-sm">
           <div className="flex flex-col items-center space-y-3">
             <div className="relative">
-              <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600"></div>
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-accent"></div>
               <div className="absolute inset-0 flex items-center justify-center">
                 <svg
-                  className="h-5 w-5 text-blue-600"
+                  className="h-5 w-5 text-accent"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -1077,13 +1070,13 @@ const OptionStrategies = ({
         </div>
       )}
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold text-slate-900">Option Strategies</h3>
+        <h3 className="text-base font-semibold text-ink">Option Strategies</h3>
         {onRefresh && (
           <button
             type="button"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed"
             title="Refresh option strategies"
           >
             <svg
@@ -1114,7 +1107,7 @@ const OptionStrategies = ({
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-base font-semibold text-slate-900">{strategy.name}</h4>
+                  <h4 className="text-base font-semibold text-ink">{strategy.name}</h4>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getSentimentColor(
                       strategy.sentiment,
@@ -1154,7 +1147,7 @@ const OptionStrategies = ({
             <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3">
               <div>
                 <p className="text-xs font-semibold text-slate-600">Strike Price</p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
+                <p className="mt-1 text-sm font-bold text-ink">
                   ${strategy.strikePrice.toFixed(2)}
                 </p>
                 {(strategy.strikePriceLower || strategy.strikePriceUpper) && (
@@ -1167,13 +1160,13 @@ const OptionStrategies = ({
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-600">Premium</p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
+                <p className="mt-1 text-sm font-bold text-ink">
                   ${strategy.premium.toFixed(2)}
                 </p>
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-600">Break Even</p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
+                <p className="mt-1 text-sm font-bold text-ink">
                   ${strategy.breakEven.toFixed(2)}
                 </p>
                 {(strategy.breakEvenLower || strategy.breakEvenUpper) && (
@@ -1186,19 +1179,19 @@ const OptionStrategies = ({
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-600">Current Price</p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
+                <p className="mt-1 text-sm font-bold text-ink">
                   ${strategy.currentPrice.toFixed(2)}
                 </p>
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-600">Max Profit</p>
-                <p className="mt-1 text-sm font-bold text-emerald-700">
+                <p className="mt-1 text-sm font-bold text-gain">
                   {typeof strategy.maxProfit === 'number' ? formatCurrency(strategy.maxProfit) : strategy.maxProfit}
                 </p>
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-600">Max Loss</p>
-                <p className="mt-1 text-sm font-bold text-rose-600">
+                <p className="mt-1 text-sm font-bold text-loss">
                   {typeof strategy.maxLoss === 'number' ? formatCurrency(strategy.maxLoss) : strategy.maxLoss}
                 </p>
               </div>
@@ -1207,11 +1200,11 @@ const OptionStrategies = ({
             <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
               <div>
                 <p className="text-xs font-semibold text-slate-600">Delta</p>
-                <p className="mt-1 text-sm font-bold text-slate-900">{strategy.delta.toFixed(2)}</p>
+                <p className="mt-1 text-sm font-bold text-ink">{strategy.delta.toFixed(2)}</p>
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-600">IV (Implied Volatility)</p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
+                <p className="mt-1 text-sm font-bold text-ink">
                   {(strategy.iv * 100).toFixed(1)}%
                   {strategy.ivRank !== undefined && (
                     <span className="ml-1 text-xs text-slate-500">(Rank: {strategy.ivRank.toFixed(0)})</span>
@@ -1221,19 +1214,19 @@ const OptionStrategies = ({
               {strategy.gamma !== undefined && (
                 <div>
                   <p className="text-xs font-semibold text-slate-600">Gamma</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">{strategy.gamma.toFixed(4)}</p>
+                  <p className="mt-1 text-sm font-bold text-ink">{strategy.gamma.toFixed(4)}</p>
                 </div>
               )}
               {strategy.theta !== undefined && (
                 <div>
                   <p className="text-xs font-semibold text-slate-600">Theta</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">${strategy.theta.toFixed(2)}/day</p>
+                  <p className="mt-1 text-sm font-bold text-ink">${strategy.theta.toFixed(2)}/day</p>
                 </div>
               )}
               {strategy.vega !== undefined && (
                 <div>
                   <p className="text-xs font-semibold text-slate-600">Vega</p>
-                  <p className="mt-1 text-sm font-bold text-slate-900">{strategy.vega.toFixed(2)}</p>
+                  <p className="mt-1 text-sm font-bold text-ink">{strategy.vega.toFixed(2)}</p>
                 </div>
               )}
             </div>
@@ -1243,25 +1236,25 @@ const OptionStrategies = ({
                 {strategy.probabilityOfProfit !== undefined && (
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Probability of Profit</p>
-                    <p className="mt-1 text-sm font-bold text-emerald-700">{strategy.probabilityOfProfit.toFixed(1)}%</p>
+                    <p className="mt-1 text-sm font-bold text-gain">{strategy.probabilityOfProfit.toFixed(1)}%</p>
                   </div>
                 )}
                 {strategy.capitalRequired !== undefined && (
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Capital Required</p>
-                    <p className="mt-1 text-sm font-bold text-slate-900">{formatCurrency(strategy.capitalRequired)}</p>
+                    <p className="mt-1 text-sm font-bold text-ink">{formatCurrency(strategy.capitalRequired)}</p>
                   </div>
                 )}
                 {strategy.returnOnCapital !== undefined && (
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Return on Capital</p>
-                    <p className="mt-1 text-sm font-bold text-emerald-700">{strategy.returnOnCapital.toFixed(1)}%</p>
+                    <p className="mt-1 text-sm font-bold text-gain">{strategy.returnOnCapital.toFixed(1)}%</p>
                   </div>
                 )}
                 {strategy.riskRewardRatio && (
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Risk/Reward</p>
-                    <p className="mt-1 text-sm font-bold text-slate-900">{strategy.riskRewardRatio}</p>
+                    <p className="mt-1 text-sm font-bold text-ink">{strategy.riskRewardRatio}</p>
                   </div>
                 )}
               </div>
@@ -1276,7 +1269,7 @@ const OptionStrategies = ({
                 <p className="text-xs font-semibold text-slate-700 mb-2">Management Notes</p>
                 <div className="space-y-1 text-xs text-slate-600">
                   {strategy.profitTarget && (
-                    <p><span className="font-medium text-emerald-700">Profit Target:</span> {strategy.profitTarget}</p>
+                    <p><span className="font-medium text-gain">Profit Target:</span> {strategy.profitTarget}</p>
                   )}
                   {strategy.stopLoss && (
                     <p><span className="font-medium text-rose-700">Stop Loss:</span> {strategy.stopLoss}</p>
@@ -1297,7 +1290,7 @@ const OptionStrategies = ({
                 <div className="space-y-2">
                   {strategy.legs.map((leg, legIndex) => (
                     <div key={`leg-${legIndex}`} className="flex items-center justify-between rounded bg-slate-50 px-3 py-2 text-xs">
-                      <span className={leg.legType === 'Buy' ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>
+                      <span className={leg.legType === 'Buy' ? 'text-gain font-semibold' : 'text-rose-700 font-semibold'}>
                         {leg.legType} {leg.quantity}x {leg.optionType}
                       </span>
                       <span className="text-slate-700">Strike: ${leg.strikePrice.toFixed(2)}</span>
@@ -1323,15 +1316,93 @@ type SectorGroup = {
   count: number
 }
 
-const HoldingsList = ({
-  filteredHoldings,
+const sectorOrder = [
+  'Technology',
+  'Index Fund',
+  'Technology ETF',
+  'Cryptocurrency',
+  'Consumer',
+  'Automotive',
+  'Aerospace',
+  'Healthcare',
+  'Real Estate',
+  'Financials',
+  'Energy',
+  'Entertainment',
+  'Telecommunications',
+  'Other',
+]
+
+const ROW_GRID =
+  'grid grid-cols-[minmax(0,1fr)_88px_76px] items-center gap-4 px-3 md:grid-cols-[minmax(0,1fr)_96px_80px_130px]'
+
+const Allocation = ({ pct, highlight }: { pct: number; highlight?: boolean }) => (
+  <span className="hidden items-center justify-end gap-2.5 md:flex">
+    <span className="flex h-1 w-16 overflow-hidden bg-track">
+      <span className={highlight ? 'bg-accent' : 'bg-ink/45'} style={{ width: `${Math.min(100, pct * 5)}%` }} />
+    </span>
+    <span className="w-11 text-right text-[13px] tabular-nums text-ink-soft">{pct.toFixed(1)}%</span>
+  </span>
+)
+
+const ValueCells = ({ amount, changePct }: { amount: number; changePct: number }) => (
+  <>
+    <span className="text-right text-sm tabular-nums">{formatCad(amount)}</span>
+    <span
+      className={`text-right text-sm font-semibold tabular-nums ${changePct >= 0 ? 'text-gain' : 'text-loss'}`}
+    >
+      {formatPercent(changePct, true)}
+    </span>
+  </>
+)
+
+const HoldingRow = ({
+  holding,
+  selected,
+  totalValue,
   onSelect,
-  onInsightsClick,
+}: {
+  holding: PortfolioHolding
+  selected: boolean
+  totalValue?: number
+  onSelect: (id: string) => void
+}) => (
+  <button
+    type="button"
+    onClick={() => onSelect(holding.id)}
+    aria-pressed={selected}
+    className={`${ROW_GRID} w-full border-t border-line py-2.5 text-left transition-colors ${
+      selected ? 'bg-[#f2f4fd]' : 'hover:bg-sand'
+    }`}
+  >
+    <span className="flex min-w-0 items-baseline gap-3">
+      <span className={`w-12 shrink-0 text-sm font-bold ${selected ? 'text-accent' : 'text-ink'}`}>
+        {holding.symbol}
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate text-sm text-ink">{holding.name}</span>
+        <span className="truncate text-xs text-muted">
+          {[holding.tag, holding.notes].filter(Boolean).join(' · ')}
+        </span>
+      </span>
+    </span>
+    <ValueCells amount={holding.amountCad} changePct={holding.changePct} />
+    {totalValue ? <Allocation pct={(holding.amountCad / totalValue) * 100} highlight={selected} /> : <span />}
+  </button>
+)
+
+const HoldingsList = ({
+  holdings,
+  selectedId,
+  totalValue,
+  onSelect,
   isSectorView = false,
 }: {
-  filteredHoldings: PortfolioHolding[]
+  holdings: PortfolioHolding[]
+  selectedId: string
+  // ponytail: allocation is only meaningful for owned holdings, so the watchlist passes undefined
+  totalValue?: number
   onSelect: (id: string) => void
-  onInsightsClick?: (holding: PortfolioHolding) => void
   isSectorView?: boolean
 }) => {
   const [expandedSectors, setExpandedSectors] = useState<Set<string>>(new Set())
@@ -1351,16 +1422,10 @@ const HoldingsList = ({
   const sectorGroups = useMemo(() => {
     if (!isSectorView) return null
 
-    const groups = filteredHoldings.reduce((acc, holding) => {
+    const groups = holdings.reduce((acc, holding) => {
       const sector = holding.tag || 'Other'
       if (!acc[sector]) {
-        acc[sector] = {
-          sector,
-          holdings: [],
-          totalAmount: 0,
-          totalChangePct: 0,
-          count: 0,
-        }
+        acc[sector] = { sector, holdings: [], totalAmount: 0, totalChangePct: 0, count: 0 }
       }
       acc[sector].holdings.push(holding)
       acc[sector].totalAmount += holding.amountCad
@@ -1368,341 +1433,167 @@ const HoldingsList = ({
       return acc
     }, {} as Record<string, SectorGroup>)
 
-    const sectorOrder = [
-      'Technology',
-      'Index Fund',
-      'Technology ETF',
-      'Cryptocurrency',
-      'Consumer',
-      'Automotive',
-      'Aerospace',
-      'Healthcare',
-      'Real Estate',
-      'Financials',
-      'Energy',
-      'Entertainment',
-      'Telecommunications',
-      'Other',
+    const ordered = [
+      ...sectorOrder.filter((sector) => groups[sector]),
+      ...Object.keys(groups).filter((sector) => !sectorOrder.includes(sector)),
     ]
 
-    const sortedGroups: SectorGroup[] = []
-    for (const sector of sectorOrder) {
-      if (groups[sector]) {
-        const group = groups[sector]
-        const totalWeightedChange = group.holdings.reduce(
-          (sum, h) => sum + h.changePct * h.amountCad,
-          0
-        )
-        group.totalChangePct = group.totalAmount > 0 ? totalWeightedChange / group.totalAmount : 0
-        sortedGroups.push(group)
-      }
-    }
-
-    for (const sector of Object.keys(groups)) {
-      if (!sectorOrder.includes(sector)) {
-        const group = groups[sector]
-        const totalWeightedChange = group.holdings.reduce(
-          (sum, h) => sum + h.changePct * h.amountCad,
-          0
-        )
-        group.totalChangePct = group.totalAmount > 0 ? totalWeightedChange / group.totalAmount : 0
-        sortedGroups.push(group)
-      }
-    }
-
-    return sortedGroups
-  }, [filteredHoldings, isSectorView])
-
-  if (isSectorView && sectorGroups) {
-    return (
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800"
-            >
-              <svg
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 6h16M4 12h16M4 18h16"
-                />
-              </svg>
-              Display & Sort
-            </button>
-          </div>
-        </div>
-        <div className="grid grid-cols-[1fr_1fr_1fr] border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-          <span>Sector</span>
-          <span className="text-right">Total Amount</span>
-          <span className="text-right">Holdings</span>
-        </div>
-        <ul className="divide-y divide-slate-200" role="list">
-          {sectorGroups.map((group, index) => {
-            const isEvenRow = index % 2 === 0
-            const rowBgColor = isEvenRow ? 'bg-slate-100' : 'bg-white'
-            const isExpanded = expandedSectors.has(group.sector)
-            return (
-              <li key={group.sector} className={rowBgColor}>
-                <div
-                  tabIndex={0}
-                  aria-label={`${group.sector} sector total ${formatCad(group.totalAmount)}`}
-                  className={`grid cursor-pointer grid-cols-[1fr_1fr_1fr] items-center gap-2 px-4 py-4 transition hover:bg-slate-200`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggleSector(group.sector)
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      toggleSector(group.sector)
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <svg
-                      className={`h-4 w-4 text-slate-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                    <div className="flex flex-col gap-1">
-                      <p className="text-sm font-semibold text-slate-900">{group.sector}</p>
-                      <p className="text-xs text-slate-600">
-                        {group.count} {group.count === 1 ? 'holding' : 'holdings'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-slate-900">{formatCad(group.totalAmount)}</p>
-                    <p
-                      className={`text-xs font-semibold ${
-                        group.totalChangePct >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                      }`}
-                    >
-                      {group.totalChangePct >= 0 ? '+' : ''}
-                      {formatPercent(group.totalChangePct)}
-                    </p>
-                  </div>
-                  <div className="text-right text-sm font-semibold text-slate-700">
-                    {group.count}
-                  </div>
-                </div>
-                {isExpanded && (
-                  <div className="border-t border-slate-300 bg-slate-50">
-                    <div className="grid grid-cols-[0.5fr_1.5fr_1fr_1fr_1fr_0.8fr] border-b border-slate-200 bg-slate-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                      <span>Symbol</span>
-                      <span>Name</span>
-                      <span className="text-right">Amount</span>
-                      <span className="text-right">Last Activity</span>
-                      <span className="text-right">Notes</span>
-                      <span className="text-center">Actions</span>
-                    </div>
-                    <ul className="divide-y divide-slate-200" role="list">
-                      {group.holdings.map((holding, holdingIndex) => {
-                        const holdingIsEvenRow = holdingIndex % 2 === 0
-                        const holdingRowBgColor = holdingIsEvenRow ? 'bg-white' : 'bg-slate-50'
-                        return (
-                          <li
-                            key={holding.id}
-                            tabIndex={0}
-                            aria-label={`${holding.name} ${holding.symbol} amount ${formatCad(holding.amountCad)}`}
-                            className={`grid cursor-pointer grid-cols-[0.5fr_1.5fr_1fr_1fr_1fr_0.8fr] items-center gap-2 px-4 py-3 pl-8 transition ${holdingRowBgColor} hover:bg-slate-200`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onSelect(holding.id)
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                onSelect(holding.id)
-                              }
-                            }}
-                          >
-                            <div className="text-sm font-bold text-slate-900">{holding.symbol}</div>
-                            <div className="flex flex-col gap-1">
-                              <p className="text-sm font-semibold text-slate-900">{holding.name}</p>
-                              <p className="text-xs font-semibold text-slate-600">
-                                {holding.tag}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-semibold text-slate-900">{formatCad(holding.amountCad)}</p>
-                              <p
-                                className={`text-xs font-semibold ${
-                                  holding.changePct >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                }`}
-                              >
-                                {holding.changePct >= 0 ? '+' : ''}
-                                {formatPercent(holding.changePct)}
-                              </p>
-                            </div>
-                            <div className="text-right text-sm font-semibold text-slate-700">
-                              {holding.lastActivity}
-                            </div>
-                            <div className="truncate text-sm text-slate-700">
-                              {holding.notes}
-                            </div>
-                            <div className="flex justify-center">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  onInsightsClick?.(holding)
-                                }}
-                                className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                                title="Generate AI Insights"
-                              >
-                                <svg
-                                  className="h-3.5 w-3.5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                                  />
-                                </svg>
-                                AI Insights
-                              </button>
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </div>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      </div>
-    )
-  }
+    return ordered.map((sector) => {
+      const group = groups[sector]
+      const weightedChange = group.holdings.reduce((sum, h) => sum + h.changePct * h.amountCad, 0)
+      group.totalChangePct = group.totalAmount > 0 ? weightedChange / group.totalAmount : 0
+      return group
+    })
+  }, [holdings, isSectorView])
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800"
-          >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-            Display & Sort
-          </button>
-        </div>
+    <div className="flex flex-col">
+      <div className={`${ROW_GRID} smallcaps border-b border-ink py-2 text-[11px] text-muted`}>
+        <span>{isSectorView ? 'Sector' : 'Holding'}</span>
+        <span className="text-right">Value</span>
+        <span className="text-right">Return</span>
+        {totalValue ? <span className="hidden text-right md:block">Weight</span> : <span />}
       </div>
-      <div className="grid grid-cols-[0.5fr_1.5fr_1fr_1fr_1fr_0.8fr] border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-        <span>Symbol</span>
-        <span>Name</span>
-        <span className="text-right">Amount</span>
-        <span className="text-right">Last Activity</span>
-        <span className="text-right">Notes</span>
-        <span className="text-center">Actions</span>
-      </div>
-      <ul className="divide-y divide-slate-200" role="list">
-        {filteredHoldings.map((holding, index) => {
-          const isEvenRow = index % 2 === 0
-          const rowBgColor = isEvenRow ? 'bg-slate-100' : 'bg-white'
-          return (
-            <li
-              key={holding.id}
-              tabIndex={0}
-              aria-label={`${holding.name} ${holding.symbol} amount ${formatCad(holding.amountCad)}`}
-              className={`grid cursor-pointer grid-cols-[0.5fr_1.5fr_1fr_1fr_1fr_0.8fr] items-center gap-2 px-4 py-4 transition ${rowBgColor} hover:bg-slate-200`}
-              onClick={() => onSelect(holding.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onSelect(holding.id)
-                }
-              }}
-            >
-              <div className="text-sm font-bold text-slate-900">{holding.symbol}</div>
-              <div className="flex flex-col gap-1">
-                <p className="text-sm font-semibold text-slate-900">{holding.name}</p>
-                <p className="text-xs font-semibold text-slate-600">
-                  {holding.tag}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-slate-900">{formatCad(holding.amountCad)}</p>
-                <p
-                  className={`text-xs font-semibold ${
-                    holding.changePct >= 0 ? 'text-emerald-700' : 'text-rose-600'
+
+      {holdings.length === 0 && (
+        <p className="border-t border-line px-3 py-10 text-center text-sm text-muted">No holdings match.</p>
+      )}
+
+      {sectorGroups
+        ? sectorGroups.map((group) => {
+            const isExpanded = expandedSectors.has(group.sector)
+            return (
+              <div key={group.sector}>
+                <button
+                  type="button"
+                  onClick={() => toggleSector(group.sector)}
+                  aria-expanded={isExpanded}
+                  className={`${ROW_GRID} w-full border-t border-line py-2.5 text-left transition-colors hover:bg-sand ${
+                    isExpanded ? 'bg-sand' : ''
                   }`}
                 >
-                  {holding.changePct >= 0 ? '+' : ''}
-                  {formatPercent(holding.changePct)}
-                </p>
-              </div>
-              <div className="text-right text-sm font-semibold text-slate-700">
-                {holding.lastActivity}
-              </div>
-              <div className="truncate text-sm text-slate-700">
-                {holding.notes}
-              </div>
-              <div className="flex justify-center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onInsightsClick?.(holding)
-                  }}
-                  className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                  title="Generate AI Insights"
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Icon
+                      d={ICONS.chevron}
+                      className={`h-4 w-4 shrink-0 text-muted transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                     />
-                  </svg>
-                  AI Insights
+                    <span className="truncate font-serif text-lg">{group.sector}</span>
+                    <span className="shrink-0 text-xs text-muted">
+                      {group.count} {group.count === 1 ? 'holding' : 'holdings'}
+                    </span>
+                  </span>
+                  <ValueCells amount={group.totalAmount} changePct={group.totalChangePct} />
+                  {totalValue ? <Allocation pct={(group.totalAmount / totalValue) * 100} /> : <span />}
                 </button>
+                {isExpanded &&
+                  group.holdings.map((holding) => (
+                    <HoldingRow
+                      key={holding.id}
+                      holding={holding}
+                      selected={holding.id === selectedId}
+                      totalValue={totalValue}
+                      onSelect={onSelect}
+                    />
+                  ))}
               </div>
-            </li>
-          )
-        })}
-      </ul>
+            )
+          })
+        : holdings.map((holding) => (
+            <HoldingRow
+              key={holding.id}
+              holding={holding}
+              selected={holding.id === selectedId}
+              totalValue={totalValue}
+              onSelect={onSelect}
+            />
+          ))}
+      <div className="border-t border-ink" />
     </div>
   )
 }
+
+const GlanceRow = ({ label, value, tone }: { label: string; value: string; tone?: string }) => (
+  <div className="flex justify-between gap-4 border-t border-line py-2.5 text-sm">
+    <dt className="text-[#4a4a4a]">{label}</dt>
+    <dd className={`text-right font-semibold tabular-nums ${tone ?? ''}`}>{value}</dd>
+  </div>
+)
+
+const SectionHeading = ({ id, title, meta }: { id: string; title: string; meta?: string }) => (
+  <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+    <h2 id={id} className="font-serif text-[34px] font-medium leading-none md:text-[40px]">
+      {title}
+    </h2>
+    {meta && <span className="text-[13px] text-[#4a4a4a]">{meta}</span>}
+  </div>
+)
+
+const BriefSection = ({
+  title,
+  tone = 'text-muted',
+  children,
+}: {
+  title: string
+  tone?: string
+  children: ReactNode
+}) => (
+  <div className="flex flex-col gap-2 border-t border-line pt-3">
+    <span className={`smallcaps text-[11px] ${tone}`}>{title}</span>
+    {children}
+  </div>
+)
+
+const RebalanceBlock = ({ rec }: { rec: RebalancingRecommendation }) => {
+  const sell = rec.action === 'Sell'
+  return (
+    <BriefSection title={`Rebalance · ${sell ? 'Trim' : 'Add'}`} tone={sell ? 'text-loss' : 'text-gain'}>
+      <div className="flex flex-wrap items-baseline gap-x-3">
+        <span className="font-serif text-2xl tabular-nums">
+          {rec.currentAllocation.toFixed(1)}% → {rec.targetAllocation.toFixed(1)}%
+        </span>
+        <span className="text-[13px] font-semibold">
+          {rec.action} {formatCad(Math.abs(rec.amount))} CAD
+        </span>
+      </div>
+      <p className="font-serif text-base leading-relaxed text-ink-soft">{rec.reason}</p>
+    </BriefSection>
+  )
+}
+
+const HarvestBlock = ({ opp }: { opp: TaxLossHarvestingOpportunity }) => (
+  <BriefSection title="Tax-loss harvest">
+    <dl className="grid grid-cols-2 gap-3">
+      <div className="flex flex-col">
+        <dt className="text-xs text-muted">Unrealized loss</dt>
+        <dd className="font-serif text-[28px] leading-tight tabular-nums text-loss">
+          {MINUS}
+          {formatCad(Math.abs(opp.unrealizedLoss))}
+        </dd>
+        <dd className="text-xs text-muted">{Math.abs(opp.lossPercentage).toFixed(1)}% below cost</dd>
+      </div>
+      <div className="flex flex-col">
+        <dt className="text-xs text-muted">Est. tax savings</dt>
+        <dd className="font-serif text-[28px] leading-tight tabular-nums text-gain">{formatCad(opp.taxSavings)}</dd>
+      </div>
+    </dl>
+    {opp.replacementOptions.length > 0 && (
+      <p className="text-[13px] text-ink-soft">
+        Swap ideas:{' '}
+        {opp.replacementOptions.map((option, index) => (
+          <span key={option.symbol}>
+            {index > 0 && ', '}
+            <abbr title={`${option.name}: ${option.reason}`} className="font-semibold no-underline">
+              {option.symbol}
+            </abbr>
+          </span>
+        ))}
+      </p>
+    )}
+    <span className="text-xs text-muted">
+      Superficial-loss risk: <strong className="text-ink">{opp.washSaleRisk}</strong>
+    </span>
+  </BriefSection>
+)
 
 export const PortfolioOverview = () => {
   const [activeList, setActiveList] = useState<'Holdings' | 'Watchlist'>('Holdings')
@@ -1727,10 +1618,26 @@ export const PortfolioOverview = () => {
     usePortfolio()
   
   const holdingsHash = useMemo(() => {
-    return JSON.stringify(holdings.map(h => ({ id: h.id, symbol: h.symbol, shares: h.shares, amountCad: h.amountCad })))
+    return JSON.stringify(holdings.map(h => ({ id: h.id, symbol: h.symbol, amountCad: h.amountCad })))
   }, [holdings])
   
-  const { refetch: refetchAnalytics } = useAnalytics(holdingsHash)
+  const {
+    refetch: refetchAnalytics,
+    performance,
+    sectorDiversification,
+    riskMetrics,
+    positionSizing,
+    rebalancing,
+    taxLossHarvesting,
+    rebalancingMetadata,
+  } = useAnalytics(holdingsHash)
+  const [months, setMonths] = useState(6)
+  const [query, setQuery] = useState('')
+  const {
+    performanceHistory,
+    updatedAt: historyUpdatedAt,
+    loading: historyLoading,
+  } = usePerformanceHistory(months, holdingsHash)
   
   const handleUploadClick = () => {
     fileInputRef.current?.click()
@@ -1755,8 +1662,8 @@ export const PortfolioOverview = () => {
         await Promise.all([
           refetch(),
           refetchAnalytics(true),
-          deleteFromIndexedDB(queryKeys.analytics.performanceHistory(6).join(':')),
-          queryClient.invalidateQueries({ queryKey: queryKeys.analytics.performanceHistory(6) }),
+          deleteFromIndexedDB(queryKeys.analytics.performanceHistory(months).join(':')),
+          queryClient.invalidateQueries({ queryKey: queryKeys.analytics.performanceHistory(months) }),
         ])
         setTimeout(() => {
           setUploadStatus({ loading: false, message: null, isError: false })
@@ -1792,7 +1699,6 @@ export const PortfolioOverview = () => {
     optionStrategies,
     loading: detailLoading,
     error: detailError,
-    refetch: stockDetailRefetch,
     loadInsights: loadInsightsFn,
     loadTrendAnalysis: loadTrendAnalysisFn,
     loadOptionStrategies: loadOptionStrategiesFn,
@@ -1923,237 +1829,438 @@ export const PortfolioOverview = () => {
   const error = portfolioError
 
   if (loading && !summary) {
-    return (
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-slate-600">Loading portfolio data...</div>
-        </div>
-      </div>
-    )
+    return <div className="flex items-center justify-center py-12 text-muted">Loading portfolio data...</div>
   }
 
   if (error) {
     return (
-      <div className="flex flex-col gap-6">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-semibold text-red-800">Error loading portfolio data</p>
-          <p className="mt-1 text-sm text-red-700">{error.message}</p>
-        </div>
+      <div className="bg-[#fbe9e6] p-4 text-[#9e2a17]">
+        <p className="text-sm font-semibold">Error loading portfolio data</p>
+        <p className="mt-1 text-sm">{error.message}</p>
       </div>
     )
   }
 
   if (!summary) {
-    return (
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-slate-600">No portfolio data available</div>
-        </div>
-      </div>
-    )
+    return <div className="flex items-center justify-center py-12 text-muted">No portfolio data available</div>
   }
 
+  const range = RANGES.find((r) => r.months === months) ?? RANGES[2]
+  const absPct = (value: number) => `${Math.abs(value).toFixed(1)}%`
+  const signedPct = (value: number) => `${value >= 0 ? '+' : MINUS}${Math.abs(value).toFixed(1)}%`
+
+  // ponytail: headline and deck are templated from live numbers, no extra AI call
+  const headline = performanceHistory
+    ? `Your portfolio ${performanceHistory.portfolioReturn >= 0 ? 'rose' : 'slipped'} ${absPct(
+        performanceHistory.portfolioReturn,
+      )} while the S&P 500 ${performanceHistory.sp500Return >= 0 ? 'climbed' : 'fell'} ${absPct(
+        performanceHistory.sp500Return,
+      )}`
+    : 'Your portfolio, at a glance'
+  const totalLoss = taxLossHarvesting.reduce((sum, o) => sum + Math.abs(o.unrealizedLoss), 0)
+  const totalSavings = taxLossHarvesting.reduce((sum, o) => sum + o.taxSavings, 0)
+  const deck = taxLossHarvesting.length
+    ? `${taxLossHarvesting.length} ${
+        taxLossHarvesting.length === 1 ? 'position carries' : 'positions carry'
+      } ${formatCad(totalLoss)} in harvestable losses, worth about ${formatCad(totalSavings)} in tax savings.`
+    : null
+
+  const annualDividendIncome = performance?.annualDividendIncome ?? 0
+  const dividendYield =
+    performance?.dividendYield ??
+    (summary.totalValueCad ? (annualDividendIncome / summary.totalValueCad) * 100 : 0)
+  const countBy = (category: HoldingCategory) => holdings.filter((h) => h.category === category).length
+
+  const q = query.trim().toLowerCase()
+  const visibleHoldings = filteredHoldings
+    .filter((h) => !q || h.symbol.toLowerCase().includes(q) || h.name.toLowerCase().includes(q))
+    .sort((a, b) => b.amountCad - a.amountCad)
+
+  const brief = hasExplicitSelection ? selectedHolding : null
+  const rebalance = brief ? rebalancing.find((r) => r.symbol === brief.symbol) : undefined
+  const harvest = brief ? taxLossHarvesting.find((t) => t.symbol === brief.symbol) : undefined
+
+  const tradeTotal = (items: RebalancingRecommendation[]) => items.reduce((sum, r) => sum + Math.abs(r.amount), 0)
+  const tradeColumns = [
+    { kicker: 'Trim', title: 'Trim these positions', verb: 'Sell', tone: 'text-loss', items: rebalancing.filter((r) => r.action === 'Sell') },
+    { kicker: 'Add', title: 'Add to these positions', verb: 'Buy', tone: 'text-gain', items: rebalancing.filter((r) => r.action === 'Buy') },
+  ]
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="relative flex flex-col gap-4 pb-12">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h1 className="text-3xl font-bold text-slate-900">
-            {formatCad(summary.totalValueCad)} CAD
-          </h1>
-          <div className={`flex items-center gap-2 text-lg font-semibold ${
-            summary.totalGainCad >= 0 ? 'text-emerald-700' : 'text-rose-600'
-          }`}>
-            {summary.totalGainCad >= 0 ? '+' : '-'} {formatCad(Math.abs(summary.totalGainCad))} ({formatPercent(summary.totalGainPct, true)}){' '}
-            <span className="text-sm font-medium text-slate-500">all time</span>
-          </div>
-        </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-3">
-          {uploadStatus.message && (
-            <div
-              className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                uploadStatus.isError
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-emerald-100 text-emerald-800'
-              }`}
-            >
-              {uploadStatus.message}
-            </div>
+    <div className="flex flex-col gap-12">
+      <div className="flex flex-wrap items-center justify-end gap-2.5">
+        {uploadStatus.message && (
+          <p
+            role="status"
+            className={`mr-auto px-3 py-2 text-sm font-medium ${
+              uploadStatus.isError ? 'bg-[#fbe9e6] text-[#9e2a17]' : 'bg-[#e3f1e8] text-gain'
+            }`}
+          >
+            {uploadStatus.message}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              // refetchAnalytics only clears the 6-month history; clear whichever range is on screen too
+              await deleteFromIndexedDB(queryKeys.analytics.performanceHistory(months).join(':'))
+              await refetchAnalytics(true)
+            } catch (error) {
+              console.error('Failed to refresh analytics:', error)
+            }
+          }}
+          title="Refresh all analytics and insights"
+          className="flex h-10 items-center gap-1.5 border border-ink bg-white px-3.5 text-[13px] font-semibold transition-colors hover:bg-sand"
+        >
+          <Icon d={ICONS.refresh} />
+          Refresh
+        </button>
+        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
+        <button
+          type="button"
+          onClick={handleUploadClick}
+          disabled={uploadStatus.loading}
+          className="flex h-10 items-center gap-1.5 border border-ink bg-ink px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#333] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {uploadStatus.loading ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          ) : (
+            <Icon d={ICONS.upload} />
           )}
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await refetchAnalytics(true)
-              } catch (error) {
-                console.error('Failed to refresh analytics:', error)
-              }
-            }}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
-            title="Refresh all analytics and insights"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-            Refresh
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <button
-            type="button"
-            onClick={handleUploadClick}
-            disabled={uploadStatus.loading}
-            className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:bg-slate-400 disabled:cursor-not-allowed"
-          >
-            {uploadStatus.loading ? (
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-            ) : (
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                />
-              </svg>
-            )}
-            {uploadStatus.loading ? 'Uploading...' : 'Upload & Update'}
-          </button>
-        </div>
+          {uploadStatus.loading ? 'Uploading...' : 'Upload & update'}
+        </button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-6">
-            <div className="flex flex-wrap items-center gap-6">
-              <DetailPill
-                label="Holdings"
-                active={activeList === 'Holdings'}
-                onClick={() => setActiveList('Holdings')}
-              />
-              <DetailPill
-                label="Watchlist"
-                active={activeList === 'Watchlist'}
-                onClick={() => setActiveList('Watchlist')}
-              />
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <article className="flex flex-col gap-4">
+          <span className="kicker text-accent">{range.name} review</span>
+          <h1 className="font-serif text-[40px] font-medium leading-[1.05] tracking-[-0.5px] text-balance md:text-[56px]">
+            {headline}
+          </h1>
+          {deck && (
+            <p className="font-serif text-[21px] italic leading-snug text-[#3a3a3a] text-pretty">{deck}</p>
+          )}
+          <span className="text-[13px] text-muted">
+            {historyUpdatedAt
+              ? `Figures as of ${new Date(historyUpdatedAt).toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}`
+              : 'Loading the latest figures…'}
+          </span>
+
+          <figure className="mt-2 flex flex-col gap-2 border-t border-line pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-[13px] text-ink-soft">
+                You <strong className={performanceHistory && performanceHistory.portfolioReturn < 0 ? 'text-loss' : 'text-gain'}>
+                  {performanceHistory ? signedPct(performanceHistory.portfolioReturn) : '—'}
+                </strong>
+                {' · '}S&amp;P 500{' '}
+                <strong className={performanceHistory && performanceHistory.sp500Return < 0 ? 'text-loss' : 'text-gain'}>
+                  {performanceHistory ? signedPct(performanceHistory.sp500Return) : '—'}
+                </strong>
+              </span>
+              <div role="group" aria-label="Chart range" className="flex gap-1">
+                {RANGES.map((r) => (
+                  <button
+                    key={r.label}
+                    type="button"
+                    onClick={() => setMonths(r.months)}
+                    aria-pressed={r.months === months}
+                    className={`smallcaps h-8 px-2 text-xs transition-colors ${
+                      r.months === months
+                        ? 'text-ink underline decoration-2 underline-offset-4'
+                        : 'text-[#8a8a8a] hover:text-ink'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+            <PortfolioPerformanceChart dataPoints={performanceHistory?.dataPoints ?? []} loading={historyLoading} />
+            <figcaption className="text-xs leading-relaxed text-muted">
+              Solid line: your portfolio. Dashed line: the S&amp;P 500, rebased to your starting value.
+            </figcaption>
+          </figure>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={`rounded-full border px-4 py-2 text-sm font-semibold transition-colors ${
-                activeTab === 'All'
-                  ? 'bg-black text-white border-black'
-                  : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-              }`}
-              onClick={() => setActiveTab('All')}
-            >
-              All
-            </button>
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition-colors ${
-                    isActive
-                      ? 'bg-black text-white border-black'
-                      : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                  }`}
-                  onClick={() => setActiveTab(tab)}
-                >
-                  {tab}
-                </button>
-              )
-            })}
-          </div>
+          {sectorDiversification && (
+            <div className="gap-9 pt-2 font-serif text-lg leading-relaxed text-[#1e1e1e] [column-rule:1px_solid_#e4e4e4] md:columns-2">
+              <p className="dropcap mb-3.5">{sectorDiversification.summary}</p>
+              {sectorDiversification.strengths.length > 0 && (
+                <p className="mb-3.5">
+                  <strong className="font-semibold">Working in your favour:</strong>{' '}
+                  {sectorDiversification.strengths.join('; ')}.
+                </p>
+              )}
+              {sectorDiversification.risks.length > 0 && (
+                <p>
+                  <strong className="font-semibold">Worth watching:</strong> {sectorDiversification.risks.join('; ')}.
+                </p>
+              )}
+            </div>
+          )}
+        </article>
 
+        <aside className="flex flex-col gap-8 lg:border-l lg:border-line lg:pl-8">
+          <section aria-labelledby="glance-h" className="flex flex-col gap-3 border-t-[3px] border-ink pt-3">
+            <h2 id="glance-h" className="smallcaps text-xs">
+              At a glance
+            </h2>
+            <div className="flex items-baseline gap-2">
+              <span className="font-serif text-[52px] font-medium leading-none tabular-nums">
+                {formatCad(summary.totalValueCad)}
+              </span>
+              <span className="text-[13px] font-semibold text-muted">CAD</span>
+            </div>
+            <dl className="flex flex-col border-b border-line">
+              <GlanceRow
+                label="All-time"
+                value={`${signedCad(summary.totalGainCad)} (${formatPercent(summary.totalGainPct, true)})`}
+                tone={summary.totalGainCad >= 0 ? 'text-gain' : 'text-loss'}
+              />
+              <GlanceRow
+                label="Dividend income"
+                value={`${formatCad(annualDividendIncome)} · ${dividendYield.toFixed(2)}% yield`}
+              />
+              <GlanceRow
+                label="Holdings"
+                value={`${holdings.length} · ${countBy('Stocks')} stocks, ${countBy('ETFs')} ETFs`}
+              />
+              <GlanceRow
+                label="Diversification"
+                value={sectorDiversification ? `${sectorDiversification.score} / 100` : '—'}
+              />
+              <GlanceRow label="Risk" value={riskMetrics?.riskStatus ?? '—'} />
+              {positionSizing && (
+                <GlanceRow label="Top-5 concentration" value={`${positionSizing.top5Percentage.toFixed(1)}%`} />
+              )}
+            </dl>
+          </section>
+
+          <section aria-labelledby="markets-h" className="flex flex-col gap-3 border-t-[3px] border-ink pt-3">
+            <h2 id="markets-h" className="smallcaps text-xs">
+              Markets
+            </h2>
+            <MarketInsightTabs
+              insights={marketInsights}
+              loading={marketInsightsLoading}
+              error={marketInsightsError}
+            />
+          </section>
+
+          <nav aria-labelledby="inside-h" className="flex flex-col gap-1 border-t-[3px] border-ink pt-3">
+            <h2 id="inside-h" className="smallcaps mb-1 text-xs">
+              Inside this edition
+            </h2>
+            {[
+              { href: '#moves', label: 'What the AI suggests', meta: `${rebalancing.length} trades` },
+              { href: '#holdings', label: 'Your holdings', meta: `${holdings.length} positions` },
+              { href: '#losses', label: 'Losses you could put to work', meta: formatCad(totalSavings) },
+            ].map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="flex items-baseline justify-between gap-3 border-b border-line py-2 font-serif text-lg text-ink no-underline hover:text-accent"
+              >
+                {link.label}
+                <span className="shrink-0 font-sans text-[13px] text-accent">{link.meta} →</span>
+              </a>
+            ))}
+          </nav>
+        </aside>
+      </div>
+
+      <section id="moves" aria-labelledby="moves-h" className="flex scroll-mt-6 flex-col gap-6 border-t-[3px] border-ink pt-4">
+        <SectionHeading
+          id="moves-h"
+          title="What the AI suggests"
+          meta={`${rebalancing.length} trades · ${formatCad(tradeTotal(rebalancing))} CAD in total${
+            rebalancingMetadata ? ` · quality score ${rebalancingMetadata.evaluationScore}%` : ''
+          }`}
+        />
+        {rebalancing.length === 0 ? (
+          <p className="text-sm text-muted">No rebalancing trades suggested right now.</p>
+        ) : (
+          <div className="grid gap-8 md:grid-cols-2 md:gap-0">
+            {tradeColumns.map((column, index) => (
+              <div
+                key={column.kicker}
+                className={`flex flex-col gap-3 ${index ? 'md:border-l md:border-line md:pl-8' : 'md:pr-8'}`}
+              >
+                <span className={`kicker ${column.tone}`}>
+                  {column.kicker} · {formatCad(tradeTotal(column.items))}
+                </span>
+                <h3 className="font-serif text-[28px] font-medium leading-tight">{column.title}</h3>
+                {column.items.length === 0 ? (
+                  <p className="text-sm text-muted">Nothing to {column.verb.toLowerCase()}.</p>
+                ) : (
+                  <table className="w-full border-collapse border-b border-line text-sm tabular-nums">
+                    <tbody>
+                      {column.items.map((rec) => (
+                        <tr key={rec.symbol} className="border-t border-line" title={rec.reason}>
+                          <th scope="row" className="py-2 text-left font-bold">
+                            {rec.symbol}
+                          </th>
+                          <td className="py-2 text-[#4a4a4a]">
+                            {rec.currentAllocation.toFixed(1)}% → {rec.targetAllocation.toFixed(1)}%
+                          </td>
+                          <td className="py-2 text-right font-semibold">
+                            {column.verb} {formatCad(Math.abs(rec.amount))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section
+        id="holdings"
+        aria-label="Holdings"
+        className="grid scroll-mt-6 gap-10 border-t-[3px] border-ink pt-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
+      >
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+            {(['Holdings', 'Watchlist'] as const).map((list) => (
+              <button
+                key={list}
+                type="button"
+                onClick={() => setActiveList(list)}
+                aria-pressed={activeList === list}
+                className={`font-serif text-[34px] font-medium leading-none transition-colors md:text-[40px] ${
+                  activeList === list ? 'text-ink' : 'text-[#b0b0b0] hover:text-ink-soft'
+                }`}
+              >
+                {list === 'Holdings' ? 'Your holdings' : 'Watchlist'}
+              </button>
+            ))}
+            <span className="text-[13px] text-muted">
+              {visibleHoldings.length} positions · values in CAD, largest first
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div role="group" aria-label="Filter holdings" className="flex flex-wrap gap-1.5">
+              {(['All', ...tabs] as const).map((tab) => {
+                const active = activeTab === tab
+                const count =
+                  tab === 'All'
+                    ? baseHoldings.length
+                    : tab === 'Sector'
+                      ? null
+                      : baseHoldings.filter((h) => h.category === tab).length
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    aria-pressed={active}
+                    className={`flex h-9 items-center gap-1.5 border px-3 text-[13px] font-semibold transition-colors ${
+                      active ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink-soft hover:border-ink'
+                    }`}
+                  >
+                    {tab === 'Sector' ? 'By sector' : tab}
+                    {count !== null && <span className="text-[11px] opacity-70">{count}</span>}
+                  </button>
+                )
+              })}
+            </div>
+            <label className="flex h-9 w-56 items-center gap-2 border-b border-ink px-1 text-muted">
+              <Icon d={ICONS.search} />
+              <span className="sr-only">Search holdings</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search holdings"
+                className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+              />
+            </label>
+          </div>
           <HoldingsList
-            filteredHoldings={filteredHoldings}
+            holdings={visibleHoldings}
+            selectedId={hasExplicitSelection ? selectedId : ''}
+            totalValue={activeList === 'Holdings' ? summary.totalValueCad : undefined}
             onSelect={handleStockSelect}
-            onInsightsClick={handleInsightsClick}
             isSectorView={activeTab === 'Sector'}
           />
         </div>
 
-        <aside className="flex flex-col gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
-            <div className="flex items-center gap-2">
-              <p className="text-base font-semibold text-slate-900">Market Insights</p>
-            </div>
-            <div className="mt-3">
-              <MarketInsightTabs
-                insights={marketInsights}
-                loading={marketInsightsLoading}
-                error={marketInsightsError}
-              />
-            </div>
-          </div>
+        <aside className="lg:border-l lg:border-line lg:pl-8">
+          {brief ? (
+            <div aria-live="polite" className="flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="kicker text-accent">Holding brief</span>
+                <button
+                  type="button"
+                  onClick={() => handleInsightsClick(brief)}
+                  title="Regenerate AI insights for this holding"
+                  className="flex h-9 items-center gap-1.5 border border-ink px-3 text-xs font-semibold transition-colors hover:bg-sand"
+                >
+                  <Icon d={ICONS.sparkle} className="h-3.5 w-3.5" />
+                  Regenerate
+                </button>
+              </div>
+              <div className="flex flex-col gap-1">
+                <h3 className="font-serif text-[40px] font-medium leading-none">{brief.symbol}</h3>
+                <span className="text-sm text-muted">{brief.name}</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-serif text-[40px] leading-none tabular-nums">{formatCad(brief.amountCad)}</span>
+                  <span
+                    className={`text-base font-semibold tabular-nums ${brief.changePct >= 0 ? 'text-gain' : 'text-loss'}`}
+                  >
+                    {formatPercent(brief.changePct, true)}
+                  </span>
+                </div>
+                <span className="text-[13px] text-muted">
+                  {[
+                    brief.notes,
+                    activeList === 'Holdings' && summary.totalValueCad
+                      ? `${((brief.amountCad / summary.totalValueCad) * 100).toFixed(1)}% of portfolio`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+                {detail && (
+                  <span className="text-[13px] text-muted">
+                    Last price{' '}
+                    <span className="font-semibold text-ink tabular-nums">
+                      ${detail.price.toFixed(2)} {detail.currency || 'USD'}
+                    </span>{' '}
+                    <span className={detail.change >= 0 ? 'text-gain' : 'text-loss'}>
+                      {detail.change >= 0 ? '+' : MINUS}
+                      {Math.abs(detail.changePct).toFixed(1)}% today
+                    </span>
+                  </span>
+                )}
+              </div>
 
-          {hasExplicitSelection && (
-            <>
+              {rebalance && <RebalanceBlock rec={rebalance} />}
+              {harvest && <HarvestBlock opp={harvest} />}
+
               {detailLoading ? (
-                <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-                    <span className="text-sm text-slate-600">Loading stock details...</span>
-                  </div>
+                <div className="flex items-center gap-2 border-t border-line pt-3 text-sm text-muted">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-line border-t-ink" />
+                  Loading stock details...
                 </div>
               ) : detailError ? (
-                <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-5 shadow-sm">
-                  <p className="text-sm font-semibold text-red-800">Error loading stock details</p>
-                  <p className="mt-1 text-sm text-red-700">{detailError.message}</p>
+                <div className="bg-[#fbe9e6] p-4 text-[#9e2a17]">
+                  <p className="text-sm font-semibold">Error loading stock details</p>
+                  <p className="mt-1 text-sm">{detailError.message}</p>
                 </div>
               ) : detail ? (
-                <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+                <div className="flex flex-col gap-3 border-t border-line pt-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">{detail.symbol} Details</p>
-                    <p className="text-3xl font-bold text-slate-900">
-                      ${detail.price.toFixed(2)} <span className="text-lg font-semibold">{detail.currency || 'USD'}</span>
-                    </p>
-                    <p className={`text-sm font-semibold ${detail.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {detail.change >= 0 ? '+' : ''} ${Math.abs(detail.change).toFixed(2)} ({detail.change >= 0 ? '+' : ''}{detail.changePct.toFixed(1)}%){' '}
-                      <span className="text-xs font-medium text-slate-500">today</span>
-                    </p>
-                  </div>
-
-                  <div className="mt-4">
                     {(() => {
                       const insightsToShow = stockInsights.length > 0 ? stockInsights : (detail.insights || [])
                       const hasInsights = insightsToShow.length > 0
@@ -2163,11 +2270,11 @@ export const PortfolioOverview = () => {
                           <button
                             type="button"
                             onClick={handleLoadStockInsights}
-                            className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-slate-50"
+                            className="flex w-full items-center justify-between border border-line bg-white px-4 py-3 transition-colors hover:border-ink"
                           >
                             <div className="flex items-center gap-2">
                               <svg
-                                className="h-5 w-5 text-blue-600"
+                                className="h-5 w-5 text-accent"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -2179,7 +2286,7 @@ export const PortfolioOverview = () => {
                                   d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                                 />
                               </svg>
-                              <p className="text-base font-semibold text-slate-900">Stock Insights</p>
+                              <p className="text-base font-semibold text-ink">Stock Insights</p>
                             </div>
                             <span className="text-sm text-slate-600">Click to load</span>
                           </button>
@@ -2188,7 +2295,7 @@ export const PortfolioOverview = () => {
                         return (
                           <>
                             <div className="flex items-center gap-2">
-                              <p className="text-base font-semibold text-slate-900">Stock Insights</p>
+                              <p className="text-base font-semibold text-ink">Stock Insights</p>
                             </div>
                             <div className="mt-3">
                               <InsightTabs insights={insightsToShow} />
@@ -2206,7 +2313,7 @@ export const PortfolioOverview = () => {
                     })()}
                   </div>
 
-                  <div className="mt-4">
+                  <div>
                     {(() => {
                       const trendToShow = trendAnalysis.length > 0 ? trendAnalysis : []
                       const hasTrend = trendToShow.length > 0
@@ -2217,11 +2324,11 @@ export const PortfolioOverview = () => {
                             type="button"
                             onClick={handleLoadTrendAnalysis}
                             disabled={loadingTrendAnalysis}
-                            className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex w-full items-center justify-between border border-line bg-white px-4 py-3 transition-colors hover:border-ink disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <div className="flex items-center gap-2">
                               <svg
-                                className="h-5 w-5 text-blue-600"
+                                className="h-5 w-5 text-accent"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -2233,7 +2340,7 @@ export const PortfolioOverview = () => {
                                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                                 />
                               </svg>
-                              <p className="text-base font-semibold text-slate-900">Historical Trend</p>
+                              <p className="text-base font-semibold text-ink">Historical Trend</p>
                             </div>
                             <span className="text-sm text-slate-600">Click to load</span>
                           </button>
@@ -2243,10 +2350,10 @@ export const PortfolioOverview = () => {
                           <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
                             <div className="flex flex-col items-center justify-center space-y-4">
                               <div className="relative">
-                                <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600"></div>
+                                <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-accent"></div>
                                 <div className="absolute inset-0 flex items-center justify-center">
                                   <svg
-                                    className="h-6 w-6 text-blue-600"
+                                    className="h-6 w-6 text-accent"
                                     fill="none"
                                     stroke="currentColor"
                                     viewBox="0 0 24 24"
@@ -2261,12 +2368,12 @@ export const PortfolioOverview = () => {
                                 </div>
                               </div>
                               <div className="text-center">
-                                <p className="text-sm font-semibold text-slate-900">Loading Historical Trend</p>
+                                <p className="text-sm font-semibold text-ink">Loading Historical Trend</p>
                                 <p className="mt-1 text-xs text-slate-500">Analyzing market data and trends...</p>
                               </div>
                               <div className="w-full max-w-xs">
                                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                                  <div className="h-full w-3/4 animate-pulse rounded-full bg-blue-600"></div>
+                                  <div className="h-full w-3/4 animate-pulse rounded-full bg-accent"></div>
                                 </div>
                               </div>
                             </div>
@@ -2291,7 +2398,7 @@ export const PortfolioOverview = () => {
                     })()}
                   </div>
 
-                  <div className="mt-4">
+                  <div>
                     {(() => {
                       const strategiesToShow = optionStrategies.length > 0 ? optionStrategies : []
                       const hasStrategies = strategiesToShow.length > 0
@@ -2316,11 +2423,11 @@ export const PortfolioOverview = () => {
                             type="button"
                             onClick={handleLoadOptionStrategies}
                             disabled={loadingOptionStrategies}
-                            className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex w-full items-center justify-between border border-line bg-white px-4 py-3 transition-colors hover:border-ink disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <div className="flex items-center gap-2">
                               <svg
-                                className="h-5 w-5 text-blue-600"
+                                className="h-5 w-5 text-accent"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -2332,7 +2439,7 @@ export const PortfolioOverview = () => {
                                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                                 />
                               </svg>
-                              <p className="text-base font-semibold text-slate-900">Option Strategies</p>
+                              <p className="text-base font-semibold text-ink">Option Strategies</p>
                             </div>
                             <span className="text-sm text-slate-600">Click to load</span>
                           </button>
@@ -2342,10 +2449,10 @@ export const PortfolioOverview = () => {
                           <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
                             <div className="flex flex-col items-center justify-center space-y-4">
                               <div className="relative">
-                                <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600"></div>
+                                <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-accent"></div>
                                 <div className="absolute inset-0 flex items-center justify-center">
                                   <svg
-                                    className="h-6 w-6 text-blue-600"
+                                    className="h-6 w-6 text-accent"
                                     fill="none"
                                     stroke="currentColor"
                                     viewBox="0 0 24 24"
@@ -2360,12 +2467,12 @@ export const PortfolioOverview = () => {
                                 </div>
                               </div>
                               <div className="text-center">
-                                <p className="text-sm font-semibold text-slate-900">Loading Option Strategies</p>
+                                <p className="text-sm font-semibold text-ink">Loading Option Strategies</p>
                                 <p className="mt-1 text-xs text-slate-500">Generating AI-powered strategies and analytics...</p>
                               </div>
                               <div className="w-full max-w-xs">
                                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                                  <div className="h-full w-3/4 animate-pulse rounded-full bg-blue-600"></div>
+                                  <div className="h-full w-3/4 animate-pulse rounded-full bg-accent"></div>
                                 </div>
                               </div>
                             </div>
@@ -2384,26 +2491,77 @@ export const PortfolioOverview = () => {
                     })()}
                   </div>
                 </div>
-              ) : selectedHolding ? (
-                <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
-                  <div className="text-slate-600">
-                    Loading details for {selectedHolding.symbol}...
-                  </div>
-                </div>
-              ) : null}
-            </>
-          )}
-
-          {!hasExplicitSelection && (
-            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
-              <div className="text-slate-600">
-                Select a stock from the {activeList.toLowerCase()} table to view detailed insights, historical trends, and option strategies.
-              </div>
+              ) : (
+                <p className="text-sm text-muted">Loading details for {brief.symbol}...</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <span className="kicker text-accent">Holding brief</span>
+              <p className="font-serif text-lg leading-relaxed text-ink-soft">
+                Select a holding from the {activeList.toLowerCase()} table to read its brief: rebalancing and
+                tax-loss ideas, stock insights, historical trends and option strategies.
+              </p>
             </div>
           )}
         </aside>
-      </div>
+      </section>
+
+      <section id="losses" aria-labelledby="losses-h" className="flex scroll-mt-6 flex-col gap-4 border-t-[3px] border-ink pt-4">
+        <SectionHeading id="losses-h" title="Losses you could put to work" />
+        {taxLossHarvesting.length === 0 ? (
+          <p className="text-sm text-muted">No tax-loss harvesting opportunities right now.</p>
+        ) : (
+          <>
+            <p className="max-w-3xl font-serif text-lg leading-relaxed text-ink-soft">
+              Selling these {taxLossHarvesting.length} at a loss could offset about{' '}
+              <strong className="font-semibold text-gain">{formatCad(totalSavings)}</strong> in tax. Each has swap
+              ideas that keep similar exposure.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] border-collapse text-sm tabular-nums">
+                <thead>
+                  <tr className="smallcaps border-b border-ink text-[11px] text-muted">
+                    <th scope="col" className="py-2 text-left">Holding</th>
+                    <th scope="col" className="py-2 text-right">Unrealized loss</th>
+                    <th scope="col" className="py-2 text-right">Below cost</th>
+                    <th scope="col" className="py-2 text-right">Est. savings</th>
+                    <th scope="col" className="py-2 pl-6 text-left">Swap ideas</th>
+                    <th scope="col" className="py-2 text-right">Superficial-loss risk</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {taxLossHarvesting.map((opp) => (
+                    <tr key={opp.symbol} className="border-b border-line">
+                      <th scope="row" className="py-2.5 text-left font-normal">
+                        <strong className="font-bold">{opp.symbol}</strong>{' '}
+                        <span className="text-muted">{opp.name}</span>
+                      </th>
+                      <td className="py-2.5 text-right font-semibold text-loss">
+                        {MINUS}
+                        {formatCad(Math.abs(opp.unrealizedLoss))}
+                      </td>
+                      <td className="py-2.5 text-right">{Math.abs(opp.lossPercentage).toFixed(1)}%</td>
+                      <td className="py-2.5 text-right font-semibold text-gain">{formatCad(opp.taxSavings)}</td>
+                      <td className="py-2.5 pl-6 text-[#4a4a4a]">
+                        {opp.replacementOptions.map((o) => o.symbol).join(', ') || '—'}
+                      </td>
+                      <td className="py-2.5 text-right">{opp.washSaleRisk}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted">
+              Mind the superficial-loss rule: don’t rebuy the same security within 30 days before or after the sale.
+            </p>
+          </>
+        )}
+      </section>
+
+      <p className="border-t border-line pt-3 text-xs text-muted">
+        AI-generated for education only. Not financial advice.
+      </p>
     </div>
   )
 }
-

@@ -8,7 +8,6 @@ import type {
   OptionStrategy,
   PerformanceMetrics,
   RiskMetrics,
-  RebalancingRecommendation,
   RebalancingResponse,
   SectorAllocation,
   NewsItem,
@@ -25,13 +24,14 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 class APIError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public statusText: string,
-  ) {
+  status: number
+  statusText: string
+
+  constructor(message: string, status: number, statusText: string) {
     super(message)
     this.name = 'APIError'
+    this.status = status
+    this.statusText = statusText
   }
 }
 

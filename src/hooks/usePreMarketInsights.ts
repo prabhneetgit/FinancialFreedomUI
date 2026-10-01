@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { analyticsAPI } from '../services/api'
-import { queryKeys } from '../lib/react-query'
 import { saveToIndexedDB, loadFromIndexedDB } from '../lib/persistence'
 
 const PRE_MARKET_INSIGHTS_QUERY_KEY = ['analytics', 'preMarketInsights'] as const

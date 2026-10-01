@@ -1,5 +1,4 @@
-export function getEasternTime(): Date {
-  const now = new Date()
+export function getEasternTime(now: Date = new Date()): Date {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric',
@@ -8,6 +7,7 @@ export function getEasternTime(): Date {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    hourCycle: 'h23', // en-US defaults to 12-hour: 2:30 PM would parse as hour 2
   })
   const parts = formatter.formatToParts(now)
   const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0'
@@ -22,8 +22,12 @@ export function getEasternTime(): Date {
   )
 }
 
-export function getCurrentTradingDate(): string {
-  const et = getEasternTime()
+// ET wall-clock date as YYYY-MM-DD. Not toISOString(): that converts to UTC and rolls over early west of UTC.
+const toDateKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+export function getCurrentTradingDate(now: Date = new Date()): string {
+  const et = getEasternTime(now)
   const hour = et.getHours()
   const minute = et.getMinutes()
   const dayOfWeek = et.getDay()
@@ -33,7 +37,7 @@ export function getCurrentTradingDate(): string {
     const daysBack = dayOfWeek === 0 ? 2 : 1
     const tradingDate = new Date(et)
     tradingDate.setDate(tradingDate.getDate() - daysBack)
-    return tradingDate.toISOString().split('T')[0]
+    return toDateKey(tradingDate)
   }
   
   if (hour < 9 || (hour === 9 && minute < 30)) {
@@ -42,8 +46,8 @@ export function getCurrentTradingDate(): string {
     while (tradingDate.getDay() === 0 || tradingDate.getDay() === 6) {
       tradingDate.setDate(tradingDate.getDate() - 1)
     }
-    return tradingDate.toISOString().split('T')[0]
+    return toDateKey(tradingDate)
   }
   
-  return et.toISOString().split('T')[0]
+  return toDateKey(et)
 }

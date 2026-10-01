@@ -18,9 +18,9 @@ interface UseStockDetailResult {
   loading: boolean
   error: Error | null
   refetch: (forceRefresh?: boolean) => Promise<void>
-  loadInsights: () => Promise<void>
-  loadTrendAnalysis: () => Promise<void>
-  loadOptionStrategies: (forceRefresh?: boolean) => Promise<void>
+  loadInsights: () => Promise<StockInsight[] | undefined>
+  loadTrendAnalysis: () => Promise<TrendAnalysis[] | undefined>
+  loadOptionStrategies: (forceRefresh?: boolean) => Promise<OptionStrategy[] | undefined>
 }
 
 export function useStockDetail(
