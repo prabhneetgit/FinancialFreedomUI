@@ -89,6 +89,11 @@ export async function saveToIndexedDB(key: string, data: unknown): Promise<void>
 }
 
 export async function loadFromIndexedDB<T>(key: string): Promise<T | null> {
+  return (await loadEntryFromIndexedDB<T>(key))?.data ?? null
+}
+
+// Like loadFromIndexedDB, but also returns when the entry was saved so callers can judge freshness.
+export async function loadEntryFromIndexedDB<T>(key: string): Promise<{ data: T; timestamp: number } | null> {
   try {
     const db = await getDB()
     if (!db) {
@@ -107,7 +112,7 @@ export async function loadFromIndexedDB<T>(key: string): Promise<T | null> {
     
     const cached = await Promise.race([operationPromise, timeoutPromise])
     if (cached && typeof cached === 'object' && 'data' in cached && cached.data) {
-      return cached.data as T
+      return { data: cached.data as T, timestamp: cached.timestamp }
     }
     return null
   } catch (error) {

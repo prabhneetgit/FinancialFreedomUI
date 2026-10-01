@@ -1,7 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { usePortfolio } from '../hooks/usePortfolio'
 import { useAnalytics as useAnalyticsHook } from '../hooks/useAnalytics'
 import { usePerformanceHistory } from '../hooks/usePerformanceHistory'
+import { queryKeys } from '../lib/react-query'
 import type {
   AlertSeverityType,
   DividendIncomeData,
@@ -1044,6 +1046,7 @@ const DividendSection = ({ dividendIncome }: { dividendIncome: DividendIncomeDat
 }
 
 export const Analytics = ({ onBackToPortfolio }: { onBackToPortfolio: () => void }) => {
+  const queryClient = useQueryClient()
   const { holdings, summary, loading: portfolioLoading, error: portfolioError } = usePortfolio()
 
   const holdingsHash = useMemo(() => {
@@ -1101,7 +1104,8 @@ export const Analytics = ({ onBackToPortfolio }: { onBackToPortfolio: () => void
   const sp500Return = performanceHistory?.sp500Return ?? performance?.sp500Return ?? 0
   const outperformance =
     performanceHistory?.outperformance ?? performance?.outperformance ?? portfolioReturn - sp500Return
-  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  // Re-read on every render; the component re-renders when the risk data arrives.
+  const riskUpdatedAt = queryClient.getQueryState(queryKeys.analytics.riskMetrics())?.dataUpdatedAt
 
   return (
     <div className="flex flex-col gap-12">
@@ -1124,7 +1128,16 @@ export const Analytics = ({ onBackToPortfolio }: { onBackToPortfolio: () => void
             {riskMetrics.riskAssessment}
           </p>
         )}
-        <span className="text-[13px] text-muted">AI review · updated {today}</span>
+        <span className="text-[13px] text-muted">
+          {riskMetrics && riskUpdatedAt
+            ? `AI review as of ${new Date(riskUpdatedAt).toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })}`
+            : 'AI review in progress…'}
+        </span>
       </header>
 
       <section

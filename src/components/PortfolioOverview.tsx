@@ -1633,7 +1633,11 @@ export const PortfolioOverview = () => {
   } = useAnalytics(holdingsHash)
   const [months, setMonths] = useState(6)
   const [query, setQuery] = useState('')
-  const { performanceHistory, loading: historyLoading } = usePerformanceHistory(months, holdingsHash)
+  const {
+    performanceHistory,
+    updatedAt: historyUpdatedAt,
+    loading: historyLoading,
+  } = usePerformanceHistory(months, holdingsHash)
   
   const handleUploadClick = () => {
     fileInputRef.current?.click()
@@ -1841,7 +1845,6 @@ export const PortfolioOverview = () => {
     return <div className="flex items-center justify-center py-12 text-muted">No portfolio data available</div>
   }
 
-  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   const range = RANGES.find((r) => r.months === months) ?? RANGES[2]
   const absPct = (value: number) => `${Math.abs(value).toFixed(1)}%`
   const signedPct = (value: number) => `${value >= 0 ? '+' : MINUS}${Math.abs(value).toFixed(1)}%`
@@ -1900,6 +1903,8 @@ export const PortfolioOverview = () => {
           type="button"
           onClick={async () => {
             try {
+              // refetchAnalytics only clears the 6-month history; clear whichever range is on screen too
+              await deleteFromIndexedDB(queryKeys.analytics.performanceHistory(months).join(':'))
               await refetchAnalytics(true)
             } catch (error) {
               console.error('Failed to refresh analytics:', error)
@@ -1936,7 +1941,16 @@ export const PortfolioOverview = () => {
           {deck && (
             <p className="font-serif text-[21px] italic leading-snug text-[#3a3a3a] text-pretty">{deck}</p>
           )}
-          <span className="text-[13px] text-muted">AI analysis · updated {today}</span>
+          <span className="text-[13px] text-muted">
+            {historyUpdatedAt
+              ? `Figures as of ${new Date(historyUpdatedAt).toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}`
+              : 'Loading the latest figures…'}
+          </span>
 
           <figure className="mt-2 flex flex-col gap-2 border-t border-line pt-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
